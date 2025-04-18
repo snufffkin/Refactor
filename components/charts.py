@@ -141,9 +141,10 @@ def display_cards_chart(df, x_col="card_id", y_cols=None, title=None, barmode="g
     
     return prepared_df
 
+
 def prepare_sequential_ids(df, id_column, sort_by=None, ascending=False, limit=None):
     """
-    Подготавливает DataFrame для отображения на графике с последовательными ID
+    Подготавливает DataFrame для отображения на графике с последовательными ID без пропусков
     
     Args:
         df: DataFrame с данными
@@ -166,14 +167,14 @@ def prepare_sequential_ids(df, id_column, sort_by=None, ascending=False, limit=N
     if limit is not None:
         result_df = result_df.head(limit)
     
-    # Создаем последовательный индекс и маппинг
+    # Создаем последовательный индекс без пропусков
     result_df = result_df.reset_index(drop=True)
-    result_df["sequential_index"] = result_df.index
+    result_df["sequential_index"] = range(len(result_df))
     
     # Сохраняем оригинальные ID для отображения в hover
     result_df["original_id"] = result_df[id_column]
     
-    # Создаем короткую версию ID
+    # Создаем короткую версию ID для отображения
     if result_df[id_column].dtype == "object" or result_df[id_column].dtype == "string":
         result_df["display_id"] = result_df[id_column]
     else:
@@ -181,7 +182,7 @@ def prepare_sequential_ids(df, id_column, sort_by=None, ascending=False, limit=N
         result_df["display_id"] = result_df[id_column].astype(str).str[-4:]
     
     return result_df
-
+    
 def display_risk_bar_chart(df, category_col, limit=20, title=None, height=None):
     """
     Отображает столбчатую диаграмму риска по категориям
