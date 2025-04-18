@@ -1,0 +1,251 @@
+# components/metrics.py
+"""
+Переиспользуемые компоненты для отображения метрик и статистики
+"""
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+import plotly.express as px
+
+# Исправление в components/metrics.py или в соответствующей функции
+
+def display_metrics_row(df, group_by_col=None, compare_with=None):
+    """
+    Отображает ряд ключевых метрик для DataFrame
+    
+    Args:
+        df: DataFrame с данными
+        group_by_col: Колонка для группировки (если None, используются все данные)
+        compare_with: DataFrame для сравнения (если указан, показывает дельту)
+    """
+    if group_by_col is not None:
+        # Агрегируем данные по указанной колонке
+        df_agg = df.groupby(group_by_col).agg(
+            success_rate=("success_rate", "mean"),
+            complaint_rate=("complaint_rate", "mean"),
+            discrimination_avg=("discrimination_avg", "mean"),
+            risk=("risk", "mean"),
+            total_items=("card_id", "nunique")
+        ).reset_index()
+        
+        # Вычисляем средние метрики
+        avg_success = df_agg["success_rate"].mean()
+        avg_complaints = df_agg["complaint_rate"].mean()
+        avg_discrimination = df_agg["discrimination_avg"].mean()
+        avg_risk = df_agg["risk"].mean()
+        total_items = df_agg["total_items"].sum()
+    else:
+        # Используем все данные
+        avg_success = df["success_rate"].mean()
+        avg_complaints = df["complaint_rate"].mean()
+        avg_discrimination = df["discrimination_avg"].mean()
+        avg_risk = df["risk"].mean()
+        total_items = len(df["card_id"].unique())
+    
+    # Если есть данные для сравнения, вычисляем дельту
+    if compare_with is not None:
+        success_delta = avg_success - compare_with["success_rate"].mean()
+        complaints_delta = avg_complaints - compare_with["complaint_rate"].mean()
+        discrimination_delta = avg_discrimination - compare_with["discrimination_avg"].mean()
+        risk_delta = avg_risk - compare_with["risk"].mean()
+    else:
+        success_delta = None
+        complaints_delta = None
+        discrimination_delta = None
+        risk_delta = None
+    
+    # Отображаем метрики в ряд
+    cols = st.columns(4)
+    
+    with cols[0]:
+        # Обратите внимание - первое значение (label) - это заголовок, второе (value) - это показатель метрики
+        st.metric(
+            "Средний успех", 
+            f"{avg_success:.1%}", 
+            f"{success_delta:.1%}" if success_delta is not None else None
+        )
+        
+    with cols[1]:
+        st.metric(
+            "Средний % жалоб", 
+            f"{avg_complaints:.1%}", 
+            f"{complaints_delta:.1%}" if complaints_delta is not None else None, 
+            delta_color="inverse"
+        )
+        
+    with cols[2]:
+        st.metric(
+            "Средняя дискриминативность", 
+            f"{avg_discrimination:.2f}", 
+            f"{discrimination_delta:.2f}" if discrimination_delta is not None else None
+        )
+        
+    with cols[3]:
+        st.metric(
+            "Средний риск", 
+            f"{avg_risk:.2f}", 
+            f"{risk_delta:.2f}" if risk_delta is not None else None, 
+            delta_color="inverse"
+        )
+    
+    # Отображаем дополнительные метрики во втором ряду
+    cols2 = st.columns(4)
+    
+    with cols2[0]:
+        st.metric("Всего элементов", f"{total_items:,}")
+    
+    # Вычисляем количество заданий с высоким риском
+    high_risk_count = len(df[df["risk"] > 0.7])
+    
+    with cols2[1]:
+        st.metric(
+            "Элементов высокого риска", 
+            f"{high_risk_count}", 
+            f"{high_risk_count/total_items:.1%} от общего числа", 
+            delta_color="inverse"
+        )
+    
+    # Добавляем метрики использования попыток, если доступны
+    if "total_attempts" in df.columns and "attempted_share" in df.columns:
+        total_attempts = df["total_attempts"].sum()
+        avg_attempted = df["attempted_share"].mean()
+        
+        with cols2[2]:
+            st.metric("Всего попыток", f"{int(total_attempts):,}")
+            
+        with cols2[3]:
+            st.metric("Среднее участие", f"{avg_attempted:.1%}")
+    
+    return {
+        "avg_success": avg_success,
+        "avg_complaints": avg_complaints, 
+        "avg_discrimination": avg_discrimination,
+        "avg_risk": avg_risk,
+        "total_items": total_items,
+        "high_risk_count": high_risk_count
+    }
+
+def display_status_chart(df, item_col=None):
+    """
+    Отображает круговую диаграмму распределения статусов
+    
+    Args:
+        df: DataFrame с данными 
+        item_col: Колонка для группировки (если None, используются все строки)
+    """
+    # Если указана колонка для группировки, агрегируем по ней
+    if item_col is not None:
+        # Сначала определим преобладающий статус для каждого элемента
+        status_by_item = df.groupby(item_col)["status"].agg(
+            lambda x: x.mode().iloc[0] if not x.mode().empty else "unknown"
+        ).reset_index()
+        
+        status_counts = status_by_item["status"].value_counts().reset_index()
+    else:
+        # Используем все строки
+        status_counts = df["status"].value_counts().reset_index()
+    
+    status_counts.columns = ["Статус", "Количество"]
+    
+    # Создаем круговую диаграмму
+    status_fig = px.pie(
+        status_counts,
+        values="Количество",
+        names="Статус",
+        title="Распределение по статусам",
+        color="Статус",
+        color_discrete_map={
+            "new": "#d3d3d3",
+            "in_work": "#add8e6",
+            "ready_for_qc": "#fffacd",
+            "done": "#90ee90",
+            "wont_fix": "#f08080",
+            "unknown": "#cccccc"
+        },
+        hole=0.4
+    )
+    
+    st.plotly_chart(status_fig, use_container_width=True)
+
+def display_risk_distribution(df, group_by_col=None):
+    """
+    Отображает распределение риска по категориям
+    
+    Args:
+        df: DataFrame с данными
+        group_by_col: Колонка для группировки (если None, используются все данные)
+    """
+    if group_by_col is not None:
+        # Группируем данные по указанной колонке
+        risk_categories = []
+        
+        for _, group in df.groupby(group_by_col):
+            avg_risk = group["risk"].mean()
+            name = group[group_by_col].iloc[0]
+            
+            if avg_risk < 0.3:
+                category = "Низкий риск"
+            elif avg_risk < 0.5:
+                category = "Средний риск"
+            elif avg_risk < 0.7:
+                category = "Высокий риск"
+            else:
+                category = "Очень высокий риск"
+                
+            risk_categories.append({"name": name, "risk": avg_risk, "category": category})
+        
+        risk_df = pd.DataFrame(risk_categories)
+        
+        # Вычисляем распределение риска по категориям
+        risk_distribution = risk_df["category"].value_counts().reset_index()
+        risk_distribution.columns = ["Категория риска", "Количество"]
+        
+        # Устанавливаем правильный порядок категорий
+        risk_order = ["Низкий риск", "Средний риск", "Высокий риск", "Очень высокий риск"]
+        risk_distribution["Категория риска"] = pd.Categorical(
+            risk_distribution["Категория риска"], 
+            categories=risk_order, 
+            ordered=True
+        )
+        risk_distribution = risk_distribution.sort_values("Категория риска")
+        
+        # Создаем цветовую схему
+        color_map = {
+            "Низкий риск": "#7FFF7F",
+            "Средний риск": "#FFFF7F",
+            "Высокий риск": "#FFAA7F",
+            "Очень высокий риск": "#FF7F7F"
+        }
+        
+        # Создаем диаграмму
+        fig = px.bar(
+            risk_distribution,
+            x="Категория риска",
+            y="Количество",
+            color="Категория риска",
+            color_discrete_map=color_map,
+            title="Распределение по уровням риска"
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        # Если нет группировки, показываем гистограмму риска
+        fig = px.histogram(
+            df,
+            x="risk",
+            nbins=20,
+            color_discrete_sequence=["#FF9F7F"],
+            labels={"risk": "Риск", "count": "Количество"},
+            title="Распределение риска"
+        )
+        
+        # Добавляем вертикальные линии для границ категорий
+        fig.add_vline(x=0.3, line_dash="dash", line_color="green", 
+                      annotation_text="Низкий", annotation_position="top")
+        fig.add_vline(x=0.5, line_dash="dash", line_color="yellow", 
+                      annotation_text="Средний", annotation_position="top")
+        fig.add_vline(x=0.7, line_dash="dash", line_color="red", 
+                      annotation_text="Высокий", annotation_position="top")
+        
+        st.plotly_chart(fig, use_container_width=True)
