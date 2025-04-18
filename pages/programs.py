@@ -1,4 +1,4 @@
-# pages/programs.py
+# pages/programs.py с обновленной нумерацией для графиков
 """
 Страница программы (Обзор + навигация по модулям)
 """
@@ -61,16 +61,24 @@ def page_programs(df: pd.DataFrame):
         module_order = df_prog.groupby("module")["module_order"].first().reset_index()
         agg = agg.merge(module_order, on="module", how="left")
         agg = agg.sort_values("module_order")
+    else:
+        # Если нет колонки с порядком, сортируем по риску
+        agg = agg.sort_values("risk", ascending=False)
     
-    # Создаем столбчатую диаграмму риска по модулям
+    # Добавляем последовательную нумерацию
+    agg = agg.reset_index(drop=True)
+    agg["module_num"] = agg.index + 1
+    
+    # Создаем столбчатую диаграмму риска по модулям с использованием порядковых номеров
     fig = px.bar(
         agg,
-        x="module",
+        x="module_num",  # Используем последовательную нумерацию вместо ID
         y="risk",
         color="risk",
         color_continuous_scale="RdYlGn_r",
-        labels={"module": "Модуль", "risk": "Риск"},
-        title="Уровень риска по модулям"
+        labels={"module_num": "Номер модуля", "risk": "Риск"},
+        title="Уровень риска по модулям",
+        hover_data=["module", "success", "complaints", "discrimination", "cards"]  # Добавляем реальное название в подсказку
     )
     
     # Добавляем горизонтальные линии для границ категорий риска
@@ -83,17 +91,19 @@ def page_programs(df: pd.DataFrame):
     
     # Форматируем подсказки
     fig.update_traces(
-        hovertemplate="<b>%{x}</b><br>" +
+        hovertemplate="<b>Модуль: %{customdata[0]}</b><br>" +
+                      "Номер: %{x}<br>" +
                       "Риск: %{y:.2f}<br>" +
-                      "Успешность: %{customdata[0]:.1%}<br>" +
-                      "Жалобы: %{customdata[1]:.1%}<br>" +
+                      "Успешность: %{customdata[1]:.1%}<br>" +
+                      "Жалобы: %{customdata[2]:.1%}<br>" +
+                      "Дискриминативность: %{customdata[3]:.2f}<br>" +
                       "Карточек: %{customdata[4]}"
     )
     
     fig.update_layout(
-        xaxis_title="Модуль",
+        xaxis_title="Номер модуля",
         yaxis_title="Риск",
-        xaxis_tickangle=-45 if len(agg) > 8 else 0
+        xaxis_tickangle=0  # Убираем наклон, т.к. числа компактны
     )
     
     st.plotly_chart(fig, use_container_width=True)
@@ -108,28 +118,85 @@ def page_programs(df: pd.DataFrame):
         display_success_complaints_chart(df_prog, "module")
     
     with tab2:
-        # График сравнения нескольких метрик
-        display_metrics_comparison(
-            df_prog,
-            "module",
-            ["success_rate", "complaint_rate", "discrimination_avg", "risk"],
-            limit=10
+        # График сравнения нескольких метрик - используем нумерацию вместо ID
+        agg_metrics = df_prog.groupby("module").agg(
+            success_rate=("success_rate", "mean"),
+            complaint_rate=("complaint_rate", "mean"),
+            discrimination_avg=("discrimination_avg", "mean"),
+            risk=("risk", "mean")
+        ).reset_index()
+        
+        # Добавляем последовательную нумерацию 
+        if "module_order" in df_prog.columns:
+            module_order = df_prog.groupby("module")["module_order"].first().reset_index()
+            agg_metrics = agg_metrics.merge(module_order, on="module", how="left")
+            agg_metrics = agg_metrics.sort_values("module_order")
+        else:
+            agg_metrics = agg_metrics.sort_values("risk", ascending=False)
+        
+        agg_metrics = agg_metrics.reset_index(drop=True)
+        agg_metrics["module_num"] = agg_metrics.index + 1
+        
+        # Ограничиваем количество модулей для отображения
+        agg_metrics = agg_metrics.head(10)
+        
+        # Переводим в формат "длинных данных" для графика
+        melted_df = pd.melt(
+            agg_metrics,
+            id_vars=["module", "module_num"],
+            value_vars=["success_rate", "complaint_rate", "discrimination_avg", "risk"],
+            var_name="metric",
+            value_name="value"
         )
+        
+        # Переименование метрик для отображения
+        metric_names = {
+            "success_rate": "Успешность",
+            "complaint_rate": "Жалобы",
+            "discrimination_avg": "Дискриминативность",
+            "risk": "Риск"
+        }
+        melted_df["metric_name"] = melted_df["metric"].map(metric_names)
+        
+        # Создаем график сравнения метрик
+        fig_metrics = px.bar(
+            melted_df,
+            x="module_num",  # Используем порядковые номера вместо ID
+            y="value",
+            color="metric_name",
+            barmode="group",
+            hover_data=["module"],  # Показываем реальное название в подсказке
+            labels={
+                "module_num": "Номер модуля",
+                "value": "Значение",
+                "metric_name": "Метрика"
+            },
+            title="Сравнение ключевых метрик по модулям"
+        )
+        
+        # Настраиваем формат оси Y в зависимости от метрики
+        fig_metrics.update_layout(
+            yaxis_tickformat=".1%",
+            xaxis_tickangle=0  # Убираем наклон, т.к. числа компактны
+        )
+        
+        st.plotly_chart(fig_metrics, use_container_width=True)
     
     # 5. Таблица с модулями
     st.subheader("📋 Детальная информация по модулям")
     
-    # Улучшенная таблица с модулями
-    detailed_df = agg[["module", "risk", "success", "complaints", "discrimination", "cards"]]
+    # Улучшенная таблица с модулями, добавляем номер для соответствия с графиком
+    detailed_df = agg[["module_num", "module", "risk", "success", "complaints", "discrimination", "cards"]]
+    detailed_df.columns = ["Номер", "Модуль", "Риск", "Успешность", "Жалобы", "Дискриминативность", "Карточек"]
     
     st.dataframe(
         detailed_df.style.format({
-            "risk": "{:.2f}",
-            "success": "{:.1%}",
-            "complaints": "{:.1%}",
-            "discrimination": "{:.2f}"
+            "Риск": "{:.2f}",
+            "Успешность": "{:.1%}",
+            "Жалобы": "{:.1%}",
+            "Дискриминативность": "{:.2f}"
         }).background_gradient(
-            subset=["risk"],
+            subset=["Риск"],
             cmap="RdYlGn_r"
         ),
         use_container_width=True

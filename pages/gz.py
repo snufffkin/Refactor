@@ -1,4 +1,4 @@
-# pages/gz.py
+# pages/gz.py с обновленной нумерацией для графиков
 """
 Страница группы заданий (Обзор + навигация по карточкам)
 """
@@ -53,16 +53,24 @@ def page_gz(df: pd.DataFrame):
     # 3. Визуализируем карточки в виде столбчатой диаграммы
     st.subheader("📊 Карточки в группе заданий")
     
+    # Добавляем последовательную нумерацию для карточек
+    df_cards = df_gz.copy().reset_index(drop=True)
+    df_cards["card_num"] = df_cards.index + 1  # Нумерация с 1
+    
+    # Сортируем по риску для лучшей визуализации
+    df_cards = df_cards.sort_values("risk", ascending=False).reset_index(drop=True)
+    df_cards["card_num"] = df_cards.index + 1  # Перенумеруем после сортировки
+    
     # Создаем столбчатую диаграмму риска по карточкам
     fig = px.bar(
-        df_gz,
-        x="card_id",
+        df_cards,
+        x="card_num",  # Используем последовательную нумерацию вместо ID
         y="risk",
         color="risk",
         color_continuous_scale="RdYlGn_r",
-        labels={"card_id": "ID карточки", "risk": "Риск"},
+        labels={"card_num": "Номер карточки", "risk": "Риск"},
         title="Уровень риска по карточкам",
-        hover_data=["success_rate", "complaint_rate", "discrimination_avg", "card_type"]
+        hover_data=["card_id", "success_rate", "complaint_rate", "discrimination_avg", "card_type"]  # Показываем реальный ID в подсказке
     )
     
     # Добавляем горизонтальные линии для границ категорий риска
@@ -75,18 +83,19 @@ def page_gz(df: pd.DataFrame):
     
     # Форматируем подсказки
     fig.update_traces(
-        hovertemplate="<b>ID: %{x}</b><br>" +
+        hovertemplate="<b>ID: %{customdata[0]}</b><br>" +
+                      "Номер: %{x}<br>" +
                       "Риск: %{y:.2f}<br>" +
-                      "Успешность: %{customdata[0]:.1%}<br>" +
-                      "Жалобы: %{customdata[1]:.1%}<br>" +
-                      "Дискриминативность: %{customdata[2]:.2f}<br>" +
-                      "Тип: %{customdata[3]}"
+                      "Успешность: %{customdata[1]:.1%}<br>" +
+                      "Жалобы: %{customdata[2]:.1%}<br>" +
+                      "Дискриминативность: %{customdata[3]:.2f}<br>" +
+                      "Тип: %{customdata[4]}"
     )
     
     fig.update_layout(
-        xaxis_title="ID карточки",
+        xaxis_title="Номер карточки",
         yaxis_title="Риск",
-        xaxis_tickangle=-45 if len(df_gz) > 8 else 0
+        xaxis_tickangle=0  # Убираем наклон, т.к. числа компактны
     )
     
     st.plotly_chart(fig, use_container_width=True)
@@ -100,13 +109,14 @@ def page_gz(df: pd.DataFrame):
     with tabs[0]:
         # График сравнения нескольких метрик для карточек
         fig = px.bar(
-            df_gz,
-            x="card_id",
+            df_cards,
+            x="card_num",  # Используем последовательную нумерацию вместо ID
             y=["success_rate", "first_try_success_rate", "complaint_rate"],
             barmode="group",
+            hover_data=["card_id", "card_type"],  # Показываем реальный ID в подсказке
             color_discrete_sequence=["#4da6ff", "#ff9040", "#ff6666"],
             labels={
-                "card_id": "ID карточки", 
+                "card_num": "Номер карточки", 
                 "value": "Значение", 
                 "variable": "Метрика"
             },
@@ -115,7 +125,7 @@ def page_gz(df: pd.DataFrame):
         
         # Настройки осей
         fig.update_layout(
-            xaxis_tickangle=-45 if len(df_gz) > 8 else 0,
+            xaxis_tickangle=0,  # Убираем наклон, т.к. числа компактны
             yaxis_tickformat=".0%",
             legend_title="Метрика"
         )
@@ -212,6 +222,15 @@ def page_gz(df: pd.DataFrame):
                       "first_try_success_rate", "complaint_rate", 
                       "discrimination_avg", "total_attempts", "risk"]]
     
+    # Добавляем номер в таблицу для соответствия с графиками
+    cards_df = cards_df.sort_values("risk", ascending=False).reset_index(drop=True)
+    cards_df["Номер"] = cards_df.index + 1
+    
+    # Переорганизуем колонки, чтобы номер был в начале
+    cards_df = cards_df[["Номер", "card_id", "card_type", "status", "success_rate", 
+                         "first_try_success_rate", "complaint_rate", 
+                         "discrimination_avg", "total_attempts", "risk"]]
+    
     # Создаем кликабельные ссылки на карточки, если доступны URL
     if "card_url" in df_gz.columns:
         cards_df_display = cards_df.copy()
@@ -222,6 +241,7 @@ def page_gz(df: pd.DataFrame):
         
         # Создаем DataFrame для отображения с более понятными названиями колонок
         formatted_df = pd.DataFrame({
+            "Номер": cards_df_display["Номер"],
             "Карточка": cards_df_display["Карточка"],
             "Тип": cards_df_display["card_type"],
             "Статус": cards_df_display["status"],
@@ -308,39 +328,47 @@ def _page_gz_inline(df: pd.DataFrame):
         cards=("card_id", "nunique")
     ).reset_index()
     
+    # Добавляем нумерацию для групп заданий
+    agg = agg.sort_values("risk", ascending=False).reset_index(drop=True)
+    agg["gz_num"] = agg.index + 1
+    
     # Создаем график
     fig = px.bar(
         agg,
-        x="gz",
+        x="gz_num",  # Используем последовательную нумерацию
         y="risk",
         color="risk",
         color_continuous_scale="RdYlGn_r",
-        labels={"gz": "Группа заданий", "risk": "Риск"},
+        labels={"gz_num": "Номер группы заданий", "risk": "Риск"},
         title="Уровень риска по группам заданий",
-        hover_data=["success", "complaints", "cards"]
+        hover_data=["gz", "success", "complaints", "cards"]  # Показываем реальный ID в подсказке
     )
     
     # Форматируем подсказки
     fig.update_traces(
-        hovertemplate="<b>%{x}</b><br>" +
+        hovertemplate="<b>%{customdata[0]}</b><br>" +
+                      "Номер: %{x}<br>" +
                       "Риск: %{y:.2f}<br>" +
-                      "Успешность: %{customdata[0]:.1%}<br>" +
-                      "Жалобы: %{customdata[1]:.1%}<br>" +
-                      "Карточек: %{customdata[2]}"
+                      "Успешность: %{customdata[1]:.1%}<br>" +
+                      "Жалобы: %{customdata[2]:.1%}<br>" +
+                      "Карточек: %{customdata[3]}"
     )
     
     fig.update_layout(
-        xaxis_tickangle=-45 if len(agg) > 8 else 0
+        xaxis_tickangle=0  # Убираем наклон, т.к. числа компактны
     )
     
     st.plotly_chart(fig, use_container_width=True)
     
-    # Таблица с группами заданий
+    # Таблица с группами заданий, добавляем номер для соответствия с графиком
+    table_df = agg[["gz_num", "gz", "risk", "success", "complaints", "cards"]]
+    table_df.columns = ["Номер", "Группа заданий", "Риск", "Успешность", "Жалобы", "Карточек"]
+    
     st.dataframe(
-        agg.style.format({
-            "risk": "{:.2f}",
-            "success": "{:.1%}",
-            "complaints": "{:.1%}"
+        table_df.style.format({
+            "Риск": "{:.2f}",
+            "Успешность": "{:.1%}",
+            "Жалобы": "{:.1%}"
         }),
         use_container_width=True
     )
