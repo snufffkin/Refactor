@@ -15,6 +15,7 @@ from components.metrics import display_metrics_row, display_status_chart, displa
 from components.charts import display_risk_bar_chart, display_metrics_comparison, display_success_complaints_chart, display_completion_radar,display_cards_chart
 
 
+# Обновлённая версия функции для страницы с карточками
 def page_cards(df: pd.DataFrame, eng):
     """Страница с детальным анализом карточек"""
     df_filtered = core.apply_filters(df)
@@ -59,7 +60,7 @@ def page_cards(df: pd.DataFrame, eng):
         - **Дискриминативность (20%)**: Низкая дискриминативность означает, что задание плохо различает знающих от незнающих студентов
         - **Доля пытавшихся (10%)**: Низкий процент студентов, пытавшихся решить задание, может указывать на проблемы
 
-        **Корректировка на статистическую значимость:**
+        **Корректировка на основе количества попыток:**
         - Для карточек с малым количеством попыток (<100) риск смещается к 0.5 (неопределённость)
         - Это позволяет избежать ложных выводов на основе недостаточных данных
         
@@ -126,6 +127,10 @@ def page_cards(df: pd.DataFrame, eng):
     # Сортируем карточки по риску для более наглядного отображения
     display_df = display_df.sort_values(by="risk", ascending=False)
     
+    # Добавляем порядковые номера для графиков вместо ID
+    display_df = display_df.reset_index(drop=True)
+    display_df["card_num"] = display_df.index + 1
+    
     # Добавляем короткие идентификаторы для отображения на графиках
     display_df["card_short_id"] = display_df["card_id"].astype(str).str[-4:]
     
@@ -146,19 +151,19 @@ def page_cards(df: pd.DataFrame, eng):
         col1, col2 = st.columns(2)
         
         with col1:
-            # График успешности по каждой карточке
+            # График успешности по каждой карточке - ИЗМЕНЕНО: использование card_num вместо card_short_id
             avg_success = display_df["success_rate"].mean()
             fig_success_cards = px.bar(
                 display_df,
-                x="card_short_id",
+                x="card_num",  # Использование порядкового номера вместо ID
                 y="success_rate",
                 color="risk",
                 hover_data=["card_id", "card_type", "total_attempts", "card_url"],
                 color_continuous_scale="RdYlGn_r",
-                labels={"success_rate": "Успешность", "card_short_id": "ID карточки (последние 4 цифры)"},
+                labels={"success_rate": "Успешность", "card_num": "Номер карточки"},
                 title="Успешность по каждой карточке"
             )
-            fig_success_cards.update_layout(xaxis_title="ID карточки (последние 4 цифры)", yaxis_title="Успешность", yaxis_tickformat=".0%")
+            fig_success_cards.update_layout(xaxis_title="Номер карточки", yaxis_title="Успешность", yaxis_tickformat=".0%")
             # Добавляем горизонтальную линию среднего значения
             fig_success_cards.add_hline(y=avg_success, line_dash="dash", line_color="green", 
                             annotation_text=f"Среднее: {avg_success:.1%}", 
@@ -166,17 +171,17 @@ def page_cards(df: pd.DataFrame, eng):
             st.plotly_chart(fig_success_cards, use_container_width=True)
         
         with col2:
-            # График соотношения успешности и успешности с первой попытки
+            # График соотношения успешности и успешности с первой попытки - ИЗМЕНЕНО: использование card_num вместо card_short_id
             fig_success_comparison = px.bar(
                 display_df,
-                x="card_short_id",
+                x="card_num",  # Использование порядкового номера вместо ID
                 y=["success_rate", "first_try_success_rate"],
                 barmode="group",
                 color_discrete_sequence=["#4da6ff", "#ff9040"],
-                labels={"value": "Успешность", "card_short_id": "ID карточки", "variable": "Метрика"},
+                labels={"value": "Успешность", "card_num": "Номер карточки", "variable": "Метрика"},
                 title="Сравнение общей успешности и успеха с первой попытки"
             )
-            fig_success_comparison.update_layout(xaxis_title="ID карточки (последние 4 цифры)", yaxis_tickformat=".0%", legend_title="Тип успешности")
+            fig_success_comparison.update_layout(xaxis_title="Номер карточки", yaxis_tickformat=".0%", legend_title="Тип успешности")
             st.plotly_chart(fig_success_comparison, use_container_width=True)
             
         # Рейтинг карточек по успешности
@@ -207,14 +212,14 @@ def page_cards(df: pd.DataFrame, eng):
                 # Используем st.dataframe вместо st.write с html
                 st.dataframe(success_table_display, hide_index=True, use_container_width=True)
             else:
-                # Если URL недоступны, используем обычный график
+                # Если URL недоступны, используем обычный график с порядковыми номерами
                 fig_top_success = px.bar(
                     top_success,
-                    x="card_short_id",
+                    x="card_num",  # Использование порядкового номера вместо ID
                     y="success_rate",
                     color="card_type",
                     text_auto=".1%",
-                    labels={"success_rate": "Успешность", "card_short_id": "ID карточки"},
+                    labels={"success_rate": "Успешность", "card_num": "Номер карточки"},
                     title="Топ-10 карточек с самой высокой успешностью"
                 )
                 fig_top_success.update_layout(yaxis_tickformat=".0%")
@@ -239,14 +244,14 @@ def page_cards(df: pd.DataFrame, eng):
                 
                 st.dataframe(bottom_table_display, hide_index=True, use_container_width=True)
             else:
-                # Если URL недоступны, используем обычный график
+                # Если URL недоступны, используем обычный график с порядковыми номерами
                 fig_bottom_success = px.bar(
                     bottom_success,
-                    x="card_short_id",
+                    x="card_num",  # Использование порядкового номера вместо ID
                     y="success_rate",
                     color="card_type",
                     text_auto=".1%",
-                    labels={"success_rate": "Успешность", "card_short_id": "ID карточки"},
+                    labels={"success_rate": "Успешность", "card_num": "Номер карточки"},
                     title="Топ-10 карточек с самой низкой успешностью"
                 )
                 fig_bottom_success.update_layout(yaxis_tickformat=".0%")
@@ -258,13 +263,14 @@ def page_cards(df: pd.DataFrame, eng):
         col1, col2 = st.columns(2)
         
         with col1:
-            # Абсолютное количество попыток по каждой карточке
+            # Абсолютное количество попыток по каждой карточке - ИЗМЕНЕНО: использование card_num вместо card_short_id
             fig_attempts_cards = px.bar(
                 display_df,
-                x="card_short_id",
+                x="card_num",  # Использование порядкового номера вместо ID
                 y="total_attempts",
                 color="card_type",
-                labels={"total_attempts": "Количество попыток", "card_short_id": "ID карточки"},
+                hover_data=["card_id"],  # Добавляем реальный ID в подсказку
+                labels={"total_attempts": "Количество попыток", "card_num": "Номер карточки"},
                 title="Количество попыток по каждой карточке"
             )
             
@@ -276,14 +282,15 @@ def page_cards(df: pd.DataFrame, eng):
             st.plotly_chart(fig_attempts_cards, use_container_width=True)
         
         with col2:
-            # Доля студентов, пытавшихся решить задание
+            # Доля студентов, пытавшихся решить задание - ИЗМЕНЕНО: использование card_num вместо card_short_id
             fig_attempted_share = px.bar(
                 display_df,
-                x="card_short_id",
+                x="card_num",  # Использование порядкового номера вместо ID
                 y="attempted_share",
                 color="risk",
+                hover_data=["card_id"],  # Добавляем реальный ID в подсказку
                 color_continuous_scale="RdYlGn_r",
-                labels={"attempted_share": "Доля пытавшихся", "card_short_id": "ID карточки"},
+                labels={"attempted_share": "Доля пытавшихся", "card_num": "Номер карточки"},
                 title="Доля студентов, пытавшихся решить задание"
             )
             fig_attempted_share.update_layout(yaxis_tickformat=".0%")
@@ -341,14 +348,15 @@ def page_cards(df: pd.DataFrame, eng):
         col1, col2 = st.columns(2)
         
         with col1:
-            # Абсолютное количество жалоб по каждой карточке
+            # Абсолютное количество жалоб по каждой карточке - ИЗМЕНЕНО: использование card_num вместо card_short_id
             fig_complaints_abs = px.bar(
                 display_df,
-                x="card_short_id",
+                x="card_num",  # Использование порядкового номера вместо ID
                 y="complaints_total",
                 color="risk",
+                hover_data=["card_id", "card_type"],  # Добавляем реальный ID в подсказку
                 color_continuous_scale="RdYlGn_r",
-                labels={"complaints_total": "Количество жалоб", "card_short_id": "ID карточки"},
+                labels={"complaints_total": "Количество жалоб", "card_num": "Номер карточки"},
                 title="Абсолютное количество жалоб по карточкам"
             )
             
@@ -360,14 +368,15 @@ def page_cards(df: pd.DataFrame, eng):
             st.plotly_chart(fig_complaints_abs, use_container_width=True)
         
         with col2:
-            # Процент жалоб по каждой карточке
+            # Процент жалоб по каждой карточке - ИЗМЕНЕНО: использование card_num вместо card_short_id
             fig_complaints_pct = px.bar(
                 display_df,
-                x="card_short_id",
+                x="card_num",  # Использование порядкового номера вместо ID
                 y="complaint_rate",
                 color="success_rate",
+                hover_data=["card_id", "card_type"],  # Добавляем реальный ID в подсказку
                 color_continuous_scale="RdYlGn",
-                labels={"complaint_rate": "Процент жалоб", "card_short_id": "ID карточки"},
+                labels={"complaint_rate": "Процент жалоб", "card_num": "Номер карточки"},
                 title="Процент жалоб по карточкам"
             )
             fig_complaints_pct.update_layout(yaxis_tickformat=".0%")
@@ -398,14 +407,15 @@ def page_cards(df: pd.DataFrame, eng):
             
             st.dataframe(complaints_table_display, hide_index=True, use_container_width=True)
         else:
-            # Если URL недоступны, используем обычный график
+            # Если URL недоступны, используем обычный график с порядковыми номерами
             fig_top_complaints = px.bar(
                 top_complaints,
-                x="card_short_id",
+                x="card_num",  # Использование порядкового номера вместо ID
                 y=["complaints_total", "total_attempts"],
                 barmode="group",
+                hover_data=["card_id"],  # Добавляем реальный ID в подсказку
                 color_discrete_sequence=["#ff6666", "#4da6ff"],
-                labels={"value": "Количество", "card_short_id": "ID карточки", "variable": "Метрика"},
+                labels={"value": "Количество", "card_num": "Номер карточки", "variable": "Метрика"},
                 title="Топ-10 карточек по абсолютному количеству жалоб"
             )
             
@@ -454,14 +464,15 @@ def page_cards(df: pd.DataFrame, eng):
         col1, col2 = st.columns(2)
         
         with col1:
-            # Индекс дискриминативности по каждой карточке
+            # Индекс дискриминативности по каждой карточке - ИЗМЕНЕНО: использование card_num вместо card_short_id
             fig_discrimination_cards = px.bar(
                 display_df,
-                x="card_short_id",
+                x="card_num",  # Использование порядкового номера вместо ID
                 y="discrimination_avg",
                 color="success_rate",
+                hover_data=["card_id", "card_type"],  # Добавляем реальный ID в подсказку
                 color_continuous_scale="RdYlGn",
-                labels={"discrimination_avg": "Индекс дискриминативности", "card_short_id": "ID карточки"},
+                labels={"discrimination_avg": "Индекс дискриминативности", "card_num": "Номер карточки"},
                 title="Индекс дискриминативности по карточкам"
             )
             
@@ -506,31 +517,33 @@ def page_cards(df: pd.DataFrame, eng):
         col1, col2 = st.columns(2)
         
         with col1:
-            # Карточки с самой низкой дискриминативностью (проблемные)
+            # Карточки с самой низкой дискриминативностью (проблемные) - ИЗМЕНЕНО: использование card_num вместо card_short_id
             low_discr = display_df.sort_values(by="discrimination_avg").head(10)
             fig_low_discr = px.bar(
                 low_discr,
-                x="card_short_id",
+                x="card_num",  # Использование порядкового номера вместо ID
                 y="discrimination_avg",
                 color="success_rate",
+                hover_data=["card_id", "card_type"],  # Добавляем реальный ID в подсказку
                 color_continuous_scale="RdYlGn",
                 text_auto=".2f",
-                labels={"discrimination_avg": "Индекс дискриминативности", "card_short_id": "ID карточки"},
+                labels={"discrimination_avg": "Индекс дискриминативности", "card_num": "Номер карточки"},
                 title="Карточки с самой низкой дискриминативностью"
             )
             st.plotly_chart(fig_low_discr, use_container_width=True)
         
         with col2:
-            # Карточки с самой высокой дискриминативностью (хорошие)
+            # Карточки с самой высокой дискриминативностью (хорошие) - ИЗМЕНЕНО: использование card_num вместо card_short_id
             high_discr = display_df.sort_values(by="discrimination_avg", ascending=False).head(10)
             fig_high_discr = px.bar(
                 high_discr,
-                x="card_short_id",
+                x="card_num",  # Использование порядкового номера вместо ID
                 y="discrimination_avg",
                 color="success_rate",
+                hover_data=["card_id", "card_type"],  # Добавляем реальный ID в подсказку
                 color_continuous_scale="RdYlGn",
                 text_auto=".2f",
-                labels={"discrimination_avg": "Индекс дискриминативности", "card_short_id": "ID карточки"},
+                labels={"discrimination_avg": "Индекс дискриминативности", "card_num": "Номер карточки"},
                 title="Карточки с самой высокой дискриминативностью"
             )
             st.plotly_chart(fig_high_discr, use_container_width=True)
@@ -643,26 +656,37 @@ def page_cards(df: pd.DataFrame, eng):
         fig_radar = go.Figure()
         
         # Определяем метрики для радара
-        radar_metrics = ["success_rate", "first_try_success_rate", "complaint_rate", "discrimination_avg", "attempted_share"]
+        radar_metrics = ["success_rate", "first_try_success_rate", "complaint_rate_inv", "discrimination_avg", "attempted_share"]
         
-        # Определяем нормализацию для каждой метрики (1 = хорошо, 0 = плохо)
-        radar_normalize = {
-            "success_rate": lambda x: x,  # Больше - лучше
-            "first_try_success_rate": lambda x: x,  # Больше - лучше
-            "complaint_rate": lambda x: 1 - x,  # Меньше - лучше
-            "discrimination_avg": lambda x: x,  # Больше - лучше
-            "attempted_share": lambda x: x  # Больше - лучше
+        # Определяем метки для метрик
+        metric_labels = {
+            "success_rate": "Успешность",
+            "first_try_success_rate": "Успех с 1-й попытки",
+            "discrimination_avg": "Дискриминативность",
+            "complaint_rate_inv": "Отсутствие жалоб",
+            "attempted_share": "Доля участия"
         }
         
-        # Добавляем каждую карточку на радар
+        # Нормализуем значения (чтобы 1 всегда было хорошо)
         for _, card in radar_cards.iterrows():
+            # Инвертируем метрики, где меньше - лучше
+            item_data = {
+                "success_rate": card["success_rate"],
+                "first_try_success_rate": card["first_try_success_rate"],
+                "discrimination_avg": card["discrimination_avg"],
+                "complaint_rate_inv": 1 - card["complaint_rate"],
+                "attempted_share": card["attempted_share"]
+            }
+            
+            # Добавляем на радар с ID карточки
             fig_radar.add_trace(go.Scatterpolar(
-                r=[radar_normalize[m](card[m]) for m in radar_metrics],
-                theta=[metrics_labels[m] for m in radar_metrics],
+                r=[item_data[m] for m in radar_metrics],
+                theta=[metric_labels[m] for m in radar_metrics],
                 fill='toself',
-                name=f"ID: {card['card_short_id']} (риск: {card['risk']:.2f})"
+                name=f"ID: {card['card_id']} (риск: {card['risk']:.2f})"
             ))
         
+        # Настройка макета
         fig_radar.update_layout(
             polar=dict(
                 radialaxis=dict(
@@ -681,9 +705,6 @@ def page_cards(df: pd.DataFrame, eng):
         # Форматируем таблицу для отображения
         table_df = top_risk_cards[["card_id", "card_type", "success_rate", "first_try_success_rate", 
                                   "complaint_rate", "discrimination_avg", "total_attempts", "risk"]]
-        
-        # Форматируем числовые значения
-        # Продолжение обновленной части функции page_cards в pages.py
         
         # Форматируем числовые значения
         formatted_table = table_df.style.format({
@@ -730,9 +751,7 @@ def page_cards(df: pd.DataFrame, eng):
         # Создаем DataFrame с отклонениями от среднего
         deviations = pd.DataFrame()
         
-        for card_id in top_risk_cards["card_short_id"]:
-            card_data = top_risk_cards[top_risk_cards["card_short_id"] == card_id].iloc[0]
-            
+        for idx, card_data in top_risk_cards.iterrows():
             card_deviations = {}
             for metric in deviation_metrics:
                 # Для complaint_rate и risk отрицательное отклонение - хорошо
@@ -743,7 +762,7 @@ def page_cards(df: pd.DataFrame, eng):
             
             card_df = pd.DataFrame.from_dict(card_deviations, orient='index').reset_index()
             card_df.columns = ["metric", "deviation"]
-            card_df["card_id"] = card_id
+            card_df["card_id"] = card_data["card_id"]
             
             deviations = pd.concat([deviations, card_df])
         
