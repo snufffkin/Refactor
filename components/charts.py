@@ -16,7 +16,7 @@ def display_cards_chart(df, x_col="card_id", y_cols=None, title=None, barmode="g
                        sort_by="risk", ascending=False, limit=50, 
                        color_discrete_sequence=None):
     """
-    Отображает график данных карточек без пропусков в ID
+    Отображает график данных карточек, заменяя ID на последовательные номера
     
     Args:
         df: DataFrame с данными карточек
@@ -29,6 +29,11 @@ def display_cards_chart(df, x_col="card_id", y_cols=None, title=None, barmode="g
         limit: Максимальное количество элементов
         color_discrete_sequence: Список цветов для столбцов
     """
+    import streamlit as st
+    import pandas as pd
+    import plotly.express as px
+    import plotly.graph_objects as go
+    
     # Проверяем, что y_cols - это список
     if y_cols is None:
         y_cols = ["success_rate"]
@@ -45,8 +50,19 @@ def display_cards_chart(df, x_col="card_id", y_cols=None, title=None, barmode="g
         "risk": "Риск"
     }
     
-    # Подготавливаем данные с последовательными индексами
-    prepared_df = prepare_sequential_ids(df, x_col, sort_by=sort_by, ascending=ascending, limit=limit)
+    # Копируем DataFrame и сортируем
+    sorted_df = df.copy()
+    
+    if sort_by is not None:
+        sorted_df = sorted_df.sort_values(by=sort_by, ascending=ascending)
+    
+    # Ограничиваем количество элементов, если нужно
+    if limit is not None and len(sorted_df) > limit:
+        sorted_df = sorted_df.head(limit)
+    
+    # Создаем новый столбец с порядковыми номерами
+    sorted_df = sorted_df.reset_index(drop=True)
+    sorted_df["card_num"] = sorted_df.index + 1  # Начинаем с 1 для лучшего восприятия пользователем
     
     # Создаем график
     if len(y_cols) == 1:
@@ -62,25 +78,26 @@ def display_cards_chart(df, x_col="card_id", y_cols=None, title=None, barmode="g
             color_scale = "Blues"
         
         fig = px.bar(
-            prepared_df,
-            x="sequential_index",
+            sorted_df,
+            x="card_num",
             y=y_col,
             color=y_col,
             color_continuous_scale=color_scale,
             labels={
-                "sequential_index": "ID карточки", 
+                "card_num": "Номер карточки", 
                 y_col: metric_labels.get(y_col, y_col)
             },
             title=title or f"{metric_labels.get(y_col, y_col)} по карточкам",
-            hover_data=["original_id", "card_type"] + ([col for col in y_cols if col != y_col])
+            hover_data=[x_col, "card_type"] + ([col for col in y_cols if col != y_col])
         )
         
         # Форматируем подсказки
         hover_format = ":.1%" if y_col in ["success_rate", "first_try_success_rate", "complaint_rate", "attempted_share"] else ":.2f"
         fig.update_traces(
             hovertemplate=f"<b>ID: %{{customdata[0]}}</b><br>" +
-                        f"Тип: %{{customdata[1]}}<br>" +
-                        f"{metric_labels.get(y_col, y_col)}: %{{y{hover_format}}}"
+                          f"Номер: %{{x}}<br>" +
+                          f"Тип: %{{customdata[1]}}<br>" +
+                          f"{metric_labels.get(y_col, y_col)}: %{{y{hover_format}}}"
         )
     else:
         # Для нескольких метрик используем go.Figure для группировки
@@ -102,15 +119,24 @@ def display_cards_chart(df, x_col="card_id", y_cols=None, title=None, barmode="g
         for i, col in enumerate(y_cols):
             # Определяем формат значений и названия
             is_percent = col in ["success_rate", "first_try_success_rate", "complaint_rate", "attempted_share"]
-            hover_template = "%{y:.1%}" if is_percent else "%{y:.2f}"
+            hover_format = ":.1%" if is_percent else ":.2f"
             name = metric_labels.get(col, col)
             
+            # Создаем текст подсказки
+            hovertemplate = (
+                f"<b>ID: {{{{customdata[0]}}}}</b><br>" +
+                f"Номер: {{{{x}}}}<br>" +
+                f"Тип: {{{{customdata[1]}}}}<br>" +
+                f"{name}: {{{{'y{hover_format}'}}}}"
+            )
+            
             fig.add_trace(go.Bar(
-                x=prepared_df["sequential_index"],
-                y=prepared_df[col],
+                x=sorted_df["card_num"],
+                y=sorted_df[col],
                 name=name,
                 marker_color=color_discrete_sequence[i % len(color_discrete_sequence)],
-                hovertemplate=f"<b>ID: {{{{{prepared_df['original_id']}}}}}</b><br>{name}: {hover_template}"
+                customdata=sorted_df[[x_col, "card_type"]],
+                hovertemplate=hovertemplate
             ))
         
         # Настройка группировки столбцов
@@ -123,23 +149,28 @@ def display_cards_chart(df, x_col="card_id", y_cols=None, title=None, barmode="g
         
         fig.update_layout(title=title)
     
-    # Настраиваем оси X - показываем короткие ID карточек
+    # Настраиваем оси X - показываем порядковый номер и добавляем метку с ID карточки
     fig.update_layout(
         xaxis=dict(
-            title="ID карточки",
+            title="Номер карточки",
             tickmode='array',
-            tickvals=prepared_df["sequential_index"],
-            ticktext=prepared_df["display_id"],
-            tickangle=-45 if len(prepared_df) > 10 else 0
+            tickvals=sorted_df["card_num"],
+            ticktext=sorted_df["card_num"],
+            tickangle=0
         ),
         yaxis_title="Значение",
-        yaxis_tickformat=".0%" if all(col in ["success_rate", "first_try_success_rate", "complaint_rate", "attempted_share"] for col in y_cols) else None
+        yaxis_tickformat=".0%" if all(col in ["success_rate", "first_try_success_rate", "complaint_rate", "attempted_share"] for col in y_cols) else None,
+        hoverlabel=dict(
+            bgcolor="white",
+            font_size=12
+        )
     )
     
     # Отображаем график
     st.plotly_chart(fig, use_container_width=True)
     
-    return prepared_df
+    # Возвращаем отсортированный датафрейм с добавленными номерами для возможного использования
+    return sorted_df
 
 
 def prepare_sequential_ids(df, id_column, sort_by=None, ascending=False, limit=None):
