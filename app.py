@@ -29,11 +29,14 @@ st.markdown("""
         display: none;
     }
     
-    /* Скрыть элементы навигации файлов */
-    section[data-testid="stSidebar"] > div.element-container:first-child {
-        visibility: hidden;
-        height: 0;
-        position: absolute;
+    /* Скрыть список файлов в боковой панели */
+    [data-testid="stSidebarNav"] {
+        display: none !important;
+    }
+    
+    /* Скрыть разделитель после списка файлов */
+    [data-testid="stSidebarNavSeparator"] {
+        display: none !important;
     }
     
     /* Прижать сайдбар к краю */
