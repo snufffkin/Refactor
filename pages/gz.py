@@ -14,6 +14,7 @@ from components.utils import create_hierarchical_header, display_clickable_items
 from components.metrics import display_metrics_row, display_status_chart, display_risk_distribution
 from components.charts import display_risk_bar_chart, display_metrics_comparison, display_success_complaints_chart, display_completion_radar
 
+# Модификация функции page_gz в pages/gz.py
 def page_gz(df: pd.DataFrame):
     """Страница группы заданий с детализацией по карточкам"""
     # Фильтруем данные по выбранной программе, модулю, уроку и группе заданий
@@ -53,24 +54,16 @@ def page_gz(df: pd.DataFrame):
     # 3. Визуализируем карточки в виде столбчатой диаграммы
     st.subheader("📊 Карточки в группе заданий")
     
-    # Добавляем последовательную нумерацию для карточек
-    df_cards = df_gz.copy().reset_index(drop=True)
-    df_cards["card_num"] = df_cards.index + 1  # Нумерация с 1
-    
-    # Сортируем по риску для лучшей визуализации
-    df_cards = df_cards.sort_values("risk", ascending=False).reset_index(drop=True)
-    df_cards["card_num"] = df_cards.index + 1  # Перенумеруем после сортировки
-    
     # Создаем столбчатую диаграмму риска по карточкам
     fig = px.bar(
-        df_cards,
-        x="card_num",  # Используем последовательную нумерацию вместо ID
+        df_gz,
+        x="card_id",
         y="risk",
         color="risk",
         color_continuous_scale="RdYlGn_r",
-        labels={"card_num": "Номер карточки", "risk": "Риск"},
+        labels={"card_id": "ID карточки", "risk": "Риск"},
         title="Уровень риска по карточкам",
-        hover_data=["card_id", "success_rate", "complaint_rate", "discrimination_avg", "card_type"]  # Показываем реальный ID в подсказке
+        hover_data=["success_rate", "complaint_rate", "discrimination_avg", "card_type"]
     )
     
     # Добавляем горизонтальные линии для границ категорий риска
@@ -83,19 +76,18 @@ def page_gz(df: pd.DataFrame):
     
     # Форматируем подсказки
     fig.update_traces(
-        hovertemplate="<b>ID: %{customdata[0]}</b><br>" +
-                      "Номер: %{x}<br>" +
+        hovertemplate="<b>ID: %{x}</b><br>" +
                       "Риск: %{y:.2f}<br>" +
-                      "Успешность: %{customdata[1]:.1%}<br>" +
-                      "Жалобы: %{customdata[2]:.1%}<br>" +
-                      "Дискриминативность: %{customdata[3]:.2f}<br>" +
-                      "Тип: %{customdata[4]}"
+                      "Успешность: %{customdata[0]:.1%}<br>" +
+                      "Жалобы: %{customdata[1]:.1%}<br>" +
+                      "Дискриминативность: %{customdata[2]:.2f}<br>" +
+                      "Тип: %{customdata[3]}"
     )
     
     fig.update_layout(
-        xaxis_title="Номер карточки",
+        xaxis_title="ID карточки",
         yaxis_title="Риск",
-        xaxis_tickangle=0  # Убираем наклон, т.к. числа компактны
+        xaxis_tickangle=-45 if len(df_gz) > 8 else 0
     )
     
     st.plotly_chart(fig, use_container_width=True)
@@ -109,14 +101,13 @@ def page_gz(df: pd.DataFrame):
     with tabs[0]:
         # График сравнения нескольких метрик для карточек
         fig = px.bar(
-            df_cards,
-            x="card_num",  # Используем последовательную нумерацию вместо ID
+            df_gz,
+            x="card_id",
             y=["success_rate", "first_try_success_rate", "complaint_rate"],
             barmode="group",
-            hover_data=["card_id", "card_type"],  # Показываем реальный ID в подсказке
             color_discrete_sequence=["#4da6ff", "#ff9040", "#ff6666"],
             labels={
-                "card_num": "Номер карточки", 
+                "card_id": "ID карточки", 
                 "value": "Значение", 
                 "variable": "Метрика"
             },
@@ -125,7 +116,7 @@ def page_gz(df: pd.DataFrame):
         
         # Настройки осей
         fig.update_layout(
-            xaxis_tickangle=0,  # Убираем наклон, т.к. числа компактны
+            xaxis_tickangle=-45 if len(df_gz) > 8 else 0,
             yaxis_tickformat=".0%",
             legend_title="Метрика"
         )
@@ -222,15 +213,6 @@ def page_gz(df: pd.DataFrame):
                       "first_try_success_rate", "complaint_rate", 
                       "discrimination_avg", "total_attempts", "risk"]]
     
-    # Добавляем номер в таблицу для соответствия с графиками
-    cards_df = cards_df.sort_values("risk", ascending=False).reset_index(drop=True)
-    cards_df["Номер"] = cards_df.index + 1
-    
-    # Переорганизуем колонки, чтобы номер был в начале
-    cards_df = cards_df[["Номер", "card_id", "card_type", "status", "success_rate", 
-                         "first_try_success_rate", "complaint_rate", 
-                         "discrimination_avg", "total_attempts", "risk"]]
-    
     # Создаем кликабельные ссылки на карточки, если доступны URL
     if "card_url" in df_gz.columns:
         cards_df_display = cards_df.copy()
@@ -241,7 +223,6 @@ def page_gz(df: pd.DataFrame):
         
         # Создаем DataFrame для отображения с более понятными названиями колонок
         formatted_df = pd.DataFrame({
-            "Номер": cards_df_display["Номер"],
             "Карточка": cards_df_display["Карточка"],
             "Тип": cards_df_display["card_type"],
             "Статус": cards_df_display["status"],
@@ -269,6 +250,305 @@ def page_gz(df: pd.DataFrame):
         )
         
         st.dataframe(formatted_cards, use_container_width=True)
+
+    # ---------------------------------------------------------------------------
+    # Добавляем дополнительный дашборд с детальным анализом карточек
+    # ---------------------------------------------------------------------------
+    st.subheader("🔍 Углубленный анализ карточек группы заданий")
+    
+    # Подготавливаем данные для анализа
+    display_df = df_gz.copy()
+    # Добавляем короткие идентификаторы для отображения на графиках
+    display_df["card_short_id"] = display_df["card_id"].astype(str).str[-4:]
+    
+    # Создаем вкладки для разных аспектов анализа
+    detailed_tabs = st.tabs(["Процент успеха", "Успех и попытки", "Жалобы", "Дискриминативность", "Компоненты риска"])
+    
+    with detailed_tabs[0]:
+        st.markdown("### Детальный анализ успешности")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # График успешности по каждой карточке
+            avg_success = display_df["success_rate"].mean()
+            fig_success_cards = px.bar(
+                display_df,
+                x="card_short_id",
+                y="success_rate",
+                color="risk",
+                hover_data=["card_id", "card_type", "total_attempts"],
+                color_continuous_scale="RdYlGn_r",
+                labels={"success_rate": "Успешность", "card_short_id": "ID карточки (последние 4 цифры)"},
+                title="Успешность по каждой карточке"
+            )
+            fig_success_cards.update_layout(xaxis_title="ID карточки (последние 4 цифры)", yaxis_title="Успешность", yaxis_tickformat=".0%")
+            # Добавляем горизонтальную линию среднего значения
+            fig_success_cards.add_hline(y=avg_success, line_dash="dash", line_color="green", 
+                            annotation_text=f"Среднее: {avg_success:.1%}", 
+                            annotation_position="top right")
+            st.plotly_chart(fig_success_cards, use_container_width=True)
+        
+        with col2:
+            # График соотношения успешности и успешности с первой попытки
+            fig_success_comparison = px.bar(
+                display_df,
+                x="card_short_id",
+                y=["success_rate", "first_try_success_rate"],
+                barmode="group",
+                color_discrete_sequence=["#4da6ff", "#ff9040"],
+                labels={"value": "Успешность", "card_short_id": "ID карточки", "variable": "Метрика"},
+                title="Сравнение общей успешности и успеха с первой попытки"
+            )
+            fig_success_comparison.update_layout(xaxis_title="ID карточки (последние 4 цифры)", yaxis_tickformat=".0%", legend_title="Тип успешности")
+            st.plotly_chart(fig_success_comparison, use_container_width=True)
+            
+    with detailed_tabs[1]:
+        st.markdown("### Попытки и успешность")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Абсолютное количество попыток по каждой карточке
+            fig_attempts_cards = px.bar(
+                display_df,
+                x="card_short_id",
+                y="total_attempts",
+                color="card_type",
+                labels={"total_attempts": "Количество попыток", "card_short_id": "ID карточки"},
+                title="Количество попыток по каждой карточке"
+            )
+            
+            # Добавляем горизонтальную линию среднего значения
+            fig_attempts_cards.add_hline(y=display_df["total_attempts"].mean(), line_dash="dash", line_color="blue", 
+                              annotation_text=f"Среднее: {display_df['total_attempts'].mean():.0f}", 
+                              annotation_position="top right")
+            
+            st.plotly_chart(fig_attempts_cards, use_container_width=True)
+        
+        with col2:
+            # Доля студентов, пытавшихся решить задание
+            fig_attempted_share = px.bar(
+                display_df,
+                x="card_short_id",
+                y="attempted_share",
+                color="risk",
+                color_continuous_scale="RdYlGn_r",
+                labels={"attempted_share": "Доля пытавшихся", "card_short_id": "ID карточки"},
+                title="Доля студентов, пытавшихся решить задание"
+            )
+            fig_attempted_share.update_layout(yaxis_tickformat=".0%")
+            
+            # Добавляем горизонтальную линию среднего значения
+            fig_attempted_share.add_hline(y=display_df["attempted_share"].mean(), line_dash="dash", line_color="green", 
+                              annotation_text=f"Среднее: {display_df['attempted_share'].mean():.1%}", 
+                              annotation_position="top right")
+            
+            st.plotly_chart(fig_attempted_share, use_container_width=True)
+    
+    with detailed_tabs[2]:
+        st.markdown("### Детальный анализ жалоб")
+        
+        # Рассчитываем абсолютное количество жалоб для каждой карточки, если его нет
+        if "complaints_total" not in display_df.columns:
+            display_df["complaints_total"] = display_df["complaint_rate"] * display_df["total_attempts"]
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Абсолютное количество жалоб по каждой карточке
+            fig_complaints_abs = px.bar(
+                display_df,
+                x="card_short_id",
+                y="complaints_total",
+                color="risk",
+                color_continuous_scale="RdYlGn_r",
+                labels={"complaints_total": "Количество жалоб", "card_short_id": "ID карточки"},
+                title="Абсолютное количество жалоб"
+            )
+            
+            # Добавляем горизонтальную линию среднего значения
+            fig_complaints_abs.add_hline(y=display_df["complaints_total"].mean(), line_dash="dash", line_color="red", 
+                              annotation_text=f"Среднее: {display_df['complaints_total'].mean():.0f}", 
+                              annotation_position="top right")
+            
+            st.plotly_chart(fig_complaints_abs, use_container_width=True)
+        
+        with col2:
+            # Процент жалоб по каждой карточке
+            fig_complaints_pct = px.bar(
+                display_df,
+                x="card_short_id",
+                y="complaint_rate",
+                color="success_rate",
+                color_continuous_scale="RdYlGn",
+                labels={"complaint_rate": "Процент жалоб", "card_short_id": "ID карточки"},
+                title="Процент жалоб"
+            )
+            fig_complaints_pct.update_layout(yaxis_tickformat=".0%")
+            
+            # Добавляем горизонтальную линию среднего значения
+            fig_complaints_pct.add_hline(y=display_df["complaint_rate"].mean(), line_dash="dash", line_color="red", 
+                              annotation_text=f"Среднее: {display_df['complaint_rate'].mean():.1%}", 
+                              annotation_position="top right")
+            
+            st.plotly_chart(fig_complaints_pct, use_container_width=True)
+    
+    with detailed_tabs[3]:
+        st.markdown("### Анализ дискриминативности")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Индекс дискриминативности по каждой карточке
+            fig_discrimination_cards = px.bar(
+                display_df,
+                x="card_short_id",
+                y="discrimination_avg",
+                color="success_rate",
+                color_continuous_scale="RdYlGn",
+                labels={"discrimination_avg": "Индекс дискриминативности", "card_short_id": "ID карточки"},
+                title="Индекс дискриминативности"
+            )
+            
+            # Добавляем горизонтальную линию среднего значения
+            fig_discrimination_cards.add_hline(y=display_df["discrimination_avg"].mean(), line_dash="dash", line_color="purple", 
+                              annotation_text=f"Среднее: {display_df['discrimination_avg'].mean():.2f}", 
+                              annotation_position="top right")
+            
+            # Добавляем горизонтальную линию оптимального значения (0.5)
+            fig_discrimination_cards.add_hline(y=0.5, line_dash="dot", line_color="black", 
+                              annotation_text="Оптимальное: 0.5", 
+                              annotation_position="bottom right")
+            
+            st.plotly_chart(fig_discrimination_cards, use_container_width=True)
+        
+        with col2:
+            # Дискриминативность vs Успешность - диаграмма рассеяния
+            fig_discr_vs_success = px.scatter(
+                display_df,
+                x="success_rate",
+                y="discrimination_avg",
+                color="risk",
+                size="total_attempts",
+                hover_data=["card_id", "card_type"],
+                color_continuous_scale="RdYlGn_r",
+                labels={"success_rate": "Успешность", "discrimination_avg": "Индекс дискриминативности"},
+                title="Зависимость дискриминативности от успешности"
+            )
+            fig_discr_vs_success.update_layout(xaxis_tickformat=".0%")
+            
+            # Отображаем оптимальную зону
+            fig_discr_vs_success.add_shape(
+                type="rect",
+                x0=0.4, y0=0.4,
+                x1=0.6, y1=0.6,
+                line=dict(color="green", width=2, dash="dash"),
+                fillcolor="rgba(0,255,0,0.1)"
+            )
+            
+            fig_discr_vs_success.add_annotation(
+                x=0.5, y=0.6,
+                text="Оптимальная зона",
+                showarrow=False,
+                font=dict(color="green")
+            )
+            
+            st.plotly_chart(fig_discr_vs_success, use_container_width=True)
+    
+    with detailed_tabs[4]:
+        st.markdown("### Компоненты риска")
+        
+        # Получаем подробные данные о компонентах риска
+        df_risk_components = core.get_risk_components(df_gz)
+        
+        # Выводим информацию о компонентах риска
+        st.markdown("""
+        #### Формула риска учитывает несколько компонентов:
+        - **Общая успешность (25%)**: Низкий процент успешных решений увеличивает риск
+        - **Успешность с первой попытки (15%)**: Низкий процент успеха с первой попытки указывает на сложность задания
+        - **Жалобы (30%)**: Высокий процент жалоб - критический показатель проблем с заданием
+        - **Дискриминативность (20%)**: Низкая дискриминативность означает, что задание плохо различает знающих от незнающих
+        - **Доля пытавшихся (10%)**: Низкий процент студентов, пытавшихся решить задание, может указывать на проблемы
+        """)
+        
+        # Создаем визуализацию компонентов риска
+        contrib_cols = [
+            "contrib_success", "contrib_first_try", "contrib_complaints", 
+            "contrib_discrimination", "contrib_attempted"
+        ]
+        
+        contrib_labels = {
+            "contrib_success": "Успешность",
+            "contrib_first_try": "Успех с 1-й попытки",
+            "contrib_complaints": "Жалобы",
+            "contrib_discrimination": "Дискриминативность",
+            "contrib_attempted": "Доля пытавшихся"
+        }
+        
+        # Для наглядности, отбираем топ-10 карточек с высоким риском
+        top_risk = df_risk_components.sort_values("risk", ascending=False).head(10)
+        top_risk["card_short_id"] = top_risk["card_id"].astype(str).str[-4:]
+        
+        fig = px.bar(
+            top_risk,
+            x="card_short_id",
+            y=contrib_cols,
+            barmode="stack",
+            color_discrete_sequence=["#ff9040", "#ffbf80", "#ff6666", "#9370db", "#66c2a5"],
+            labels={
+                "card_short_id": "ID карточки",
+                "value": "Вклад в риск",
+                "variable": "Компонент"
+            },
+            title="Вклад различных компонентов в итоговый риск (топ-10 карточек)"
+        )
+        
+        # Переименовываем легенду
+        fig.for_each_trace(lambda t: t.update(name = contrib_labels.get(t.name, t.name)))
+        
+        # Добавляем общий риск как линию
+        fig.add_trace(go.Scatter(
+            x=top_risk["card_short_id"],
+            y=top_risk["raw_risk"],
+            mode="lines+markers",
+            name="Общий риск",
+            marker=dict(color="black"),
+            line=dict(color="black", width=2)
+        ))
+        
+        # Настраиваем макет
+        fig.update_layout(
+            xaxis_title="ID карточки (последние 4 цифры)",
+            yaxis_title="Вклад в риск",
+            legend_title="Компонент"
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Отображаем таблицу с компонентами риска
+        risk_table = top_risk[["card_id", "risk_success", "risk_first_try", "risk_complaints", 
+                             "risk_discrimination", "risk_attempted", "raw_risk", "confidence_factor", "adjusted_risk"]]
+        
+        st.markdown("### Таблица компонентов риска")
+        st.markdown("*Значения риска от 0 до 1, где 1 - максимальный риск*")
+        
+        formatted_risk_table = risk_table.style.format({
+            "risk_success": "{:.2f}",
+            "risk_first_try": "{:.2f}",
+            "risk_complaints": "{:.2f}",
+            "risk_discrimination": "{:.2f}",
+            "risk_attempted": "{:.2f}",
+            "raw_risk": "{:.2f}",
+            "confidence_factor": "{:.2f}",
+            "adjusted_risk": "{:.2f}"
+        }).background_gradient(
+            subset=["risk_success", "risk_first_try", "risk_complaints", 
+                   "risk_discrimination", "risk_attempted", "raw_risk", "adjusted_risk"],
+            cmap="RdYlGn_r"
+        )
+        
+        st.dataframe(formatted_risk_table, use_container_width=True)
     
     # 6. Список карточек с кликабельными ссылками
     st.subheader("🗂️ Карточки группы заданий")
@@ -304,7 +584,7 @@ def page_gz(df: pd.DataFrame):
     
     # Если нет URL, показываем просто список карточек
     else:
-        display_clickable_items(df_gz, "card_id", "card_id", metrics=["risk"])
+        display_clickable_items(df_gz, "card_id", "card", metrics=["risk"])
 
 def _page_gz_inline(df: pd.DataFrame):
     """Встроенная версия страницы групп заданий для отображения на странице урока"""
