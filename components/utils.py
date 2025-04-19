@@ -9,13 +9,15 @@ import numpy as np
 
 def create_hierarchical_header(levels, values, emoji_map=None):
     """
-    Создает иерархический заголовок страницы в виде "лесенки"
+    Создает иерархический заголовок страницы в виде "лесенки" с кликабельными элементами
     
     Args:
         levels: Список названий уровней иерархии
         values: Список значений для каждого уровня
         emoji_map: Словарь с эмодзи для каждого уровня
     """
+    import core
+    
     if emoji_map is None:
         emoji_map = {
             "program": "📚",
@@ -32,7 +34,7 @@ def create_hierarchical_header(levels, values, emoji_map=None):
     
     st.header(f"{emoji} {current_level.capitalize()}: {current_value}")
     
-    # Создаем "лесенку" навигации с улучшенным UI
+    # Создаем "лесенку" навигации с улучшенным UI и кликабельными элементами
     nav_col1, nav_col2 = st.columns([1, 3])
     
     with nav_col1:
@@ -41,11 +43,16 @@ def create_hierarchical_header(levels, values, emoji_map=None):
     
     with nav_col2:
         for i, value in enumerate(values):
-            st.markdown(f"**{value or '—'}**")
+            if value and i < len(levels):  # Проверяем, что значение существует и уровень соответствует
+                # Создаем кликабельную ссылку, используя функцию clickable
+                level = levels[i]
+                core.clickable(value, level)
+            else:
+                st.markdown(f"**{value or '—'}**")
     
     # Добавляем разделитель
     st.markdown("---")
-
+    
 def display_clickable_items(df, column, level, metrics=None):
     """
     Отображает список кликабельных элементов в две колонки
