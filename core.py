@@ -35,8 +35,7 @@ def load_data(engine):
 
 # ---------------- Filters / Risk ------------------------------------------ #
 
-# Обновленный FILTERS
-FILTERS: List[str] = ["program", "module", "lesson", "gz", "card_id"]  # Добавлен "card_id" в список фильтров
+FILTERS: List[str] = ["program", "module", "lesson", "gz"]  # Добавил "gz" в список фильтров
 
 
 def risk_score(row: pd.Series) -> float:
@@ -92,51 +91,22 @@ def risk_score(row: pd.Series) -> float:
 
 
 def apply_filters(df: pd.DataFrame, upto: Optional[List[str]] = None) -> pd.DataFrame:
-    """
-    Применяет фильтры из session_state к DataFrame.
-    
-    Args:
-        df: DataFrame с данными
-        upto: Список фильтров для применения (если None, применяются все фильтры)
-    
-    Returns:
-        Отфильтрованный DataFrame
-    """
     cols = FILTERS if upto is None else upto
     for col in cols:
         v = st.session_state.get(f"filter_{col}")
         if v:
-            if col == "card_id":  # Специальная обработка для card_id, который должен быть точным совпадением
-                df = df[df[col] == v]
-            else:
-                df = df[df[col] == v]
+            df = df[df[col] == v]
     return df
 
-# Обновленная функция reset_child в core.py
+
 def reset_child(level: str):
-    """
-    Сбрасывает дочерние фильтры относительно указанного уровня и 
-    обновляет текущую страницу навигации соответственно.
-    """
+    """Сбрасывает дочерние фильтры относительно указанного уровня."""
     if level not in FILTERS:
         return
     
     idx = FILTERS.index(level)
     for col in FILTERS[idx+1:]:
         st.session_state[f"filter_{col}"] = None
-    
-    # Обновляем текущую страницу в соответствии с уровнем фильтрации
-    page_mapping = {
-        "program": "Программы", 
-        "module": "Модули", 
-        "lesson": "Уроки",
-        "gz": "ГЗ",
-        "card_id": "Карточки"
-    }
-    
-    # Если уровень имеет соответствующую страницу, устанавливаем её
-    if level in page_mapping and "page" in st.session_state:
-        st.session_state["page"] = page_mapping[level]
 
 # ---------------- Aggregation --------------------------------------------- #
 

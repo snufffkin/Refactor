@@ -144,56 +144,13 @@ PAGES = {
     "Карточки": lambda df: pages.page_cards(df, engine),
 }
 
-# Определение текущей страницы навигации
-# Если страница уже выбрана в session_state, используем её
-# Иначе, определяем страницу на основе выбранных фильтров
-if "page" not in st.session_state:
-    # Определение страницы на основе выбранных фильтров
-    if st.session_state.get("filter_program") and not st.session_state.get("filter_module"):
-        st.session_state["page"] = "Программы"
-    elif st.session_state.get("filter_module") and not st.session_state.get("filter_lesson"):
-        st.session_state["page"] = "Модули"
-    elif st.session_state.get("filter_lesson") and not st.session_state.get("filter_gz"):
-        st.session_state["page"] = "Уроки"
-    elif st.session_state.get("filter_gz") and not st.session_state.get("filter_card_id"):
-        st.session_state["page"] = "ГЗ"
-    elif st.session_state.get("filter_card_id"):
-        st.session_state["page"] = "Карточки"
-    else:
-        st.session_state["page"] = "Обзор"
-
-# Отображаем селектор навигации с текущей выбранной страницей
 choice = st.sidebar.radio(
     "Навигация",
     list(PAGES.keys()),
     index=list(PAGES.keys()).index(st.session_state.get("page", "Обзор")),
-    key="navigation_radio"
 )
 
-# Обновляем текущую страницу только если выбор изменился вручную
-if choice != st.session_state["page"]:
-    st.session_state["page"] = choice
-    # Если пользователь выбрал страницу, которая не соответствует текущему уровню фильтрации,
-    # сбрасываем фильтры, которые не соответствуют уровню страницы
-    if choice == "Обзор":
-        # Сбрасываем все фильтры
-        for col in core.FILTERS:
-            st.session_state[f"filter_{col}"] = None
-    elif choice == "Программы" and any(st.session_state.get(f"filter_{col}") for col in ["module", "lesson", "gz", "card_id"]):
-        # Сбрасываем фильтры ниже уровня программы
-        for col in ["module", "lesson", "gz", "card_id"]:
-            st.session_state[f"filter_{col}"] = None
-    elif choice == "Модули" and any(st.session_state.get(f"filter_{col}") for col in ["lesson", "gz", "card_id"]):
-        # Сбрасываем фильтры ниже уровня модуля
-        for col in ["lesson", "gz", "card_id"]:
-            st.session_state[f"filter_{col}"] = None
-    elif choice == "Уроки" and any(st.session_state.get(f"filter_{col}") for col in ["gz", "card_id"]):
-        # Сбрасываем фильтры ниже уровня урока
-        for col in ["gz", "card_id"]:
-            st.session_state[f"filter_{col}"] = None
-    elif choice == "ГЗ" and st.session_state.get("filter_card_id"):
-        # Сбрасываем фильтр карточки
-        st.session_state["filter_card_id"] = None
+st.session_state["page"] = choice
 
 # Добавляем информацию о приложении
 with st.sidebar:
@@ -209,4 +166,4 @@ with st.sidebar:
     """)
 
 # Запускаем выбранную страницу
-PAGES[st.session_state["page"]](data)
+PAGES[choice](data)

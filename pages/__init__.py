@@ -1,4 +1,3 @@
-
 # pages/__init__.py
 """
 Экспорты функций страниц для удобного импорта
@@ -13,4 +12,4 @@ from .programs import page_programs
 from .modules import page_modules
 from .lessons import page_lessons
 from .gz import page_gz
-from .cards import page_cards
+from .cards import page_cards 
