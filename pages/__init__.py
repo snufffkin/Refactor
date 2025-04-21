@@ -13,3 +13,4 @@ from .modules import page_modules
 from .lessons import page_lessons
 from .gz import page_gz
 from .cards import page_cards 
+from .admin import page_admin

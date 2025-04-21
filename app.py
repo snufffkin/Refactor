@@ -142,6 +142,7 @@ PAGES = {
     "Уроки": pages.page_lessons,
     "ГЗ": pages.page_gz,
     "Карточки": lambda df: pages.page_cards(df, engine),
+    "⚙️ Настройки": pages.page_admin,  # Добавляем страницу администрирования
 }
 
 choice = st.sidebar.radio(

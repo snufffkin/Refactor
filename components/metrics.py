@@ -184,14 +184,14 @@ def display_risk_distribution(df, group_by_col=None):
             avg_risk = group["risk"].mean()
             name = group[group_by_col].iloc[0]
             
-            if avg_risk < 0.3:
+            if avg_risk < 0.25:                # Было 0.3
                 category = "Низкий риск"
-            elif avg_risk < 0.5:
-                category = "Средний риск"
-            elif avg_risk < 0.7:
+            elif avg_risk < 0.5:               # Остается 0.5
+                category = "Умеренный риск"    # Было "Средний риск"
+            elif avg_risk < 0.75:              # Было 0.7
                 category = "Высокий риск"
             else:
-                category = "Очень высокий риск"
+                category = "Критический риск"  # Было "Очень высокий риск"
                 
             risk_categories.append({"name": name, "risk": avg_risk, "category": category})
         
@@ -202,7 +202,7 @@ def display_risk_distribution(df, group_by_col=None):
         risk_distribution.columns = ["Категория риска", "Количество"]
         
         # Устанавливаем правильный порядок категорий
-        risk_order = ["Низкий риск", "Средний риск", "Высокий риск", "Очень высокий риск"]
+        risk_order = ["Низкий риск", "Умеренный риск", "Высокий риск", "Критический риск"]  # Обновите порядок категорий
         risk_distribution["Категория риска"] = pd.Categorical(
             risk_distribution["Категория риска"], 
             categories=risk_order, 
@@ -210,12 +210,11 @@ def display_risk_distribution(df, group_by_col=None):
         )
         risk_distribution = risk_distribution.sort_values("Категория риска")
         
-        # Создаем цветовую схему
         color_map = {
             "Низкий риск": "#7FFF7F",
-            "Средний риск": "#FFFF7F",
+            "Умеренный риск": "#FFFF7F",   # Было "Средний риск"
             "Высокий риск": "#FFAA7F",
-            "Очень высокий риск": "#FF7F7F"
+            "Критический риск": "#FF7F7F"  # Было "Очень высокий риск"
         }
         
         # Создаем диаграмму
@@ -241,11 +240,15 @@ def display_risk_distribution(df, group_by_col=None):
         )
         
         # Добавляем вертикальные линии для границ категорий
-        fig.add_vline(x=0.3, line_dash="dash", line_color="green", 
+        fig.add_vline(x=0.25, line_dash="dash", line_color="green",         # Было 0.3
                       annotation_text="Низкий", annotation_position="top")
-        fig.add_vline(x=0.5, line_dash="dash", line_color="yellow", 
-                      annotation_text="Средний", annotation_position="top")
-        fig.add_vline(x=0.7, line_dash="dash", line_color="red", 
+        fig.add_vline(x=0.5, line_dash="dash", line_color="yellow",         # Остается 0.5
+                      annotation_text="Умеренный", annotation_position="top") # Было "Средний"
+        fig.add_vline(x=0.75, line_dash="dash", line_color="red",           # Было 0.7
                       annotation_text="Высокий", annotation_position="top")
+        
+        # Добавьте дополнительную линию для критического риска
+        fig.add_vline(x=0.75, line_dash="dash", line_color="darkred",
+                      annotation_text="Критический", annotation_position="top")
         
         st.plotly_chart(fig, use_container_width=True)
