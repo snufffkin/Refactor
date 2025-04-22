@@ -14,287 +14,7 @@ import plotly.graph_objects as go
 import core
 from core_config import get_tricky_config, save_tricky_config, get_config, save_config
 
-# Функция для обновления демонстрации расчета риска
-def demo_risk_calculation_with_trickiness():
-    """
-    Обновленная демонстрация расчета риска с использованием подлости вместо first_try
-    """
-    st.markdown("## Интерактивная демонстрация")
-    
-    # Создаем две колонки: для ввода значений и для графика
-    demo_col1, demo_col2 = st.columns([1, 2])
-    
-    with demo_col1:
-        st.markdown("### Введите значения метрик")
-        
-        # Создаем слайдеры для всех метрик
-        demo_discr = st.slider(
-            "Дискриминативность",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.4,
-            step=0.05,
-            key="demo_discr"
-        )
-        
-        demo_success = st.slider(
-            "Успешность",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.85,
-            step=0.05,
-            key="demo_success"
-        )
-        
-        # Вместо первой попытки используем уровень подлости
-        demo_trickiness = st.slider(
-            "Уровень подлости",
-            min_value=0,
-            max_value=3,
-            value=1,
-            step=1,
-            key="demo_trickiness"
-        )
-        
-        demo_complaints = st.number_input(
-            "Количество жалоб",
-            min_value=0,
-            max_value=100,
-            value=5,
-            step=1,
-            key="demo_complaints"
-        )
-        
-        demo_attempts = st.slider(
-            "Доля пытавшихся",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.9,
-            step=0.05,
-            key="demo_attempts"
-        )
-        
-        demo_total_attempts = st.number_input(
-            "Количество попыток",
-            min_value=1,
-            max_value=1000,
-            value=200,
-            step=10,
-            key="demo_total_attempts"
-        )
-    
-    # Получаем конфигурацию
-    config = core.get_config()
-    
-    # Создаем временные функции для расчета риска с текущими настройками
-    def demo_get_discr_risk(val):
-        if val >= config["discrimination"]["good"]:
-            normalized = min(1.0, (val - config["discrimination"]["good"]) / 0.4)
-            return max(0, 0.25 * (1 - normalized))
-        elif val >= config["discrimination"]["medium"]:
-            normalized = (val - config["discrimination"]["medium"]) / (config["discrimination"]["good"] - config["discrimination"]["medium"])
-            return 0.50 - normalized * 0.24
-        else:
-            normalized = max(0, val / config["discrimination"]["medium"])
-            return 1.0 - normalized * 0.49
-    
-    def demo_get_success_risk(val):
-        if val > config["success_rate"]["boring"]:
-            normalized = min(1.0, (val - config["success_rate"]["boring"]) / 0.05)
-            return 0.30 + normalized * 0.10
-        elif val >= config["success_rate"]["optimal_low"]:
-            normalized = (val - config["success_rate"]["optimal_low"]) / (config["success_rate"]["boring"] - config["success_rate"]["optimal_low"])
-            return 0.25 * (1 - normalized)
-        elif val >= config["success_rate"]["suboptimal_low"]:
-            normalized = (val - config["success_rate"]["suboptimal_low"]) / (config["success_rate"]["optimal_low"] - config["success_rate"]["suboptimal_low"])
-            return 0.50 - normalized * 0.24
-        else:
-            normalized = max(0, val / config["success_rate"]["suboptimal_low"])
-            return 1.0 - normalized * 0.49
-    
-    def demo_get_trickiness_risk(val):
-        # Функция для расчета риска подлости (0-1)
-        if val == 0:
-            return 0.0  # Нет риска, если карточка не является "трики"
-        elif val == 1:
-            return 0.3  # Низкий уровень риска для низкой подлости
-        elif val == 2:
-            return 0.6  # Средний уровень риска для средней подлости
-        elif val == 3:
-            return 0.9  # Высокий уровень риска для высокой подлости
-        return 0.0
-    
-    def demo_get_complaints_risk(val):
-        if val > config["complaints"]["critical"]:
-            excess = min(100, val - config["complaints"]["critical"])
-            normalized = excess / 100
-            return 0.76 + normalized * 0.24
-        elif val >= config["complaints"]["high"]:
-            normalized = (val - config["complaints"]["high"]) / (config["complaints"]["critical"] - config["complaints"]["high"])
-            return 0.51 + normalized * 0.24
-        elif val >= config["complaints"]["medium"]:
-            normalized = (val - config["complaints"]["medium"]) / (config["complaints"]["high"] - config["complaints"]["medium"])
-            return 0.26 + normalized * 0.24
-        else:
-            normalized = val / max(1, config["complaints"]["medium"])
-            return normalized * 0.25
-    
-    def demo_get_attempts_risk(val):
-        if val > config["attempts"]["high"]:
-            normalized = min(1.0, (val - config["attempts"]["high"]) / 0.05)
-            return 0.10 * (1 - normalized)
-        elif val >= config["attempts"]["normal_low"]:
-            normalized = (val - config["attempts"]["normal_low"]) / (config["attempts"]["high"] - config["attempts"]["normal_low"])
-            return 0.25 - normalized * 0.15
-        elif val >= config["attempts"]["insufficient_low"]:
-            normalized = (val - config["attempts"]["insufficient_low"]) / (config["attempts"]["normal_low"] - config["attempts"]["insufficient_low"])
-            return 0.50 - normalized * 0.24
-        else:
-            normalized = max(0, val / config["attempts"]["insufficient_low"])
-            return 1.0 - normalized * 0.49
-    
-    # Рассчитываем риски для каждой метрики
-    risk_discr = demo_get_discr_risk(demo_discr)
-    risk_success = demo_get_success_risk(demo_success)
-    risk_trickiness = demo_get_trickiness_risk(demo_trickiness)  # Используем подлость вместо first_try
-    risk_complaints = demo_get_complaints_risk(demo_complaints)
-    risk_attempts = demo_get_attempts_risk(demo_attempts)
-    
-    # Рассчитываем максимальный риск
-    max_risk = max(risk_discr, risk_success, risk_trickiness, risk_complaints, risk_attempts)
-    
-    # Получаем веса из конфигурации
-    WEIGHT_DISCRIMINATION = config["weights"]["discrimination"]
-    WEIGHT_SUCCESS_RATE = config["weights"]["success_rate"]
-    WEIGHT_TRICKINESS = config["weights"].get("trickiness", 0.15)
-    WEIGHT_COMPLAINT_RATE = config["weights"]["complaint_rate"]
-    WEIGHT_ATTEMPTED = config["weights"]["attempted"]
-    
-    # Рассчитываем взвешенное среднее
-    weighted_avg = (
-        WEIGHT_DISCRIMINATION * risk_discr +
-        WEIGHT_SUCCESS_RATE * risk_success +
-        WEIGHT_TRICKINESS * risk_trickiness +
-        WEIGHT_COMPLAINT_RATE * risk_complaints +
-        WEIGHT_ATTEMPTED * risk_attempts
-    )
-    
-    # Определяем минимальный порог
-    if max_risk > config["risk_thresholds"]["critical"]:
-        min_threshold = config["risk_thresholds"]["min_for_critical"]
-    elif max_risk > config["risk_thresholds"]["high"]:
-        min_threshold = config["risk_thresholds"]["min_for_high"]
-    else:
-        min_threshold = 0
-    
-    # Применяем комбинированную формулу
-    combined_risk = config["risk_thresholds"]["alpha_weight_avg"] * weighted_avg + (1 - config["risk_thresholds"]["alpha_weight_avg"]) * max_risk
-    raw_risk = max(weighted_avg, combined_risk, min_threshold)
-    
-    # Корректировка на статистическую значимость
-    confidence = min(demo_total_attempts / config["stats"]["significance_threshold"], 1.0)
-    final_risk = raw_risk * confidence + config["stats"]["neutral_risk_value"] * (1 - confidence)
-    
-    with demo_col2:
-        st.markdown("### Результат расчета риска")
-        
-        # Создаем датафрейм для отображения рисков по метрикам
-        risks_df = pd.DataFrame({
-            "Метрика": ["Дискриминативность", "Успешность", "Подлость", "Количество жалоб", "Доля пытавшихся"],
-            "Значение": [demo_discr, demo_success, demo_trickiness, demo_complaints, demo_attempts],
-            "Риск": [risk_discr, risk_success, risk_trickiness, risk_complaints, risk_attempts],
-            "Вес": [
-                WEIGHT_DISCRIMINATION,
-                WEIGHT_SUCCESS_RATE,
-                WEIGHT_TRICKINESS,
-                WEIGHT_COMPLAINT_RATE,
-                WEIGHT_ATTEMPTED
-            ],
-            "Взвешенный риск": [
-                WEIGHT_DISCRIMINATION * risk_discr,
-                WEIGHT_SUCCESS_RATE * risk_success,
-                WEIGHT_TRICKINESS * risk_trickiness,
-                WEIGHT_COMPLAINT_RATE * risk_complaints,
-                WEIGHT_ATTEMPTED * risk_attempts
-            ]
-        })
-        
-        # Сортируем по взвешенному риску
-        risks_df = risks_df.sort_values("Взвешенный риск", ascending=False)
-        
-        # Создаем график с вкладом каждой метрики
-        fig = px.bar(
-            risks_df,
-            x="Метрика",
-            y="Взвешенный риск",
-            title="Вклад метрик в общий риск",
-            color="Риск",
-            color_continuous_scale="RdYlGn_r",
-            text=risks_df["Риск"].apply(lambda x: f"{x:.2f}")
-        )
-        
-        # Добавляем горизонтальную линию для взвешенного среднего
-        fig.add_hline(
-            y=weighted_avg,
-            line_dash="dash",
-            line_color="blue",
-            annotation_text=f"Взвешенное среднее: {weighted_avg:.2f}",
-            annotation_position="top right"
-        )
-        
-        # Добавляем горизонтальную линию для максимального риска
-        fig.add_hline(
-            y=max_risk,
-            line_dash="dash",
-            line_color="red",
-            annotation_text=f"Максимальный риск: {max_risk:.2f}",
-            annotation_position="top right"
-        )
-        
-        # Обновляем макет
-        fig.update_layout(height=400)
-        
-        # Отображаем график
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Показываем итоговый расчет риска
-        st.markdown("### Формула расчета риска")
-        
-        # Описание расчета
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("#### Промежуточные значения:")
-            st.markdown(f"**Взвешенное среднее:** {weighted_avg:.3f}")
-            st.markdown(f"<span style='color:gray; font-size:0.9em'>= ({WEIGHT_DISCRIMINATION:.3f} × {risk_discr:.3f}) + ({WEIGHT_SUCCESS_RATE:.3f} × {risk_success:.3f}) + ({WEIGHT_TRICKINESS:.3f} × {risk_trickiness:.3f}) + ({WEIGHT_COMPLAINT_RATE:.3f} × {risk_complaints:.3f}) + ({WEIGHT_ATTEMPTED:.3f} × {risk_attempts:.3f})</span>", unsafe_allow_html=True)
-            
-            st.markdown(f"**Максимальный риск:** {max_risk:.3f}")
-            st.markdown(f"<span style='color:gray; font-size:0.9em'>= max({risk_discr:.3f}, {risk_success:.3f}, {risk_trickiness:.3f}, {risk_complaints:.3f}, {risk_attempts:.3f})</span>", unsafe_allow_html=True)
-        
-        # Возвращаем результаты расчета
-        return {
-            "risks": {
-                "discrimination": risk_discr,
-                "success": risk_success,
-                "trickiness": risk_trickiness,
-                "complaints": risk_complaints,
-                "attempts": risk_attempts
-            },
-            "weights": {
-                "discrimination": WEIGHT_DISCRIMINATION,
-                "success": WEIGHT_SUCCESS_RATE,
-                "trickiness": WEIGHT_TRICKINESS,
-                "complaints": WEIGHT_COMPLAINT_RATE,
-                "attempts": WEIGHT_ATTEMPTED
-            },
-            "weighted_avg": weighted_avg,
-            "max_risk": max_risk,
-            "min_threshold": min_threshold,
-            "combined_risk": combined_risk,
-            "raw_risk": raw_risk,
-            "confidence": confidence,
-            "final_risk": final_risk
-        }
+
 
 # Вспомогательная функция для отображения таблицы с трики-карточками
 def display_tricky_cards_table(tricky_df):
@@ -713,7 +433,7 @@ def page_admin(df: pd.DataFrame):
                 "Слишком простая задача (выше этого значения)",
                 min_value=0.8,
                 max_value=1.0,
-                value=float(config["first_try"]["too_easy"]),
+                value=0.9,  # Используем фиксированное значение вместо обращения к config["first_try"]["too_easy"]
                 step=0.01,
                 format="%.2f",
                 key="first_try_too_easy"
@@ -723,7 +443,7 @@ def page_admin(df: pd.DataFrame):
                 "Нижняя граница оптимальной успешности с первой попытки",
                 min_value=0.4,
                 max_value=first_try_too_easy,
-                value=min(float(config["first_try"]["optimal_low"]), first_try_too_easy),
+                value=0.65,  # Используем фиксированное значение вместо обращения к config["first_try"]["optimal_low"]
                 step=0.01,
                 format="%.2f",
                 key="first_try_optimal_low"
@@ -733,16 +453,16 @@ def page_admin(df: pd.DataFrame):
                 "Нижняя граница требующей нескольких попыток",
                 min_value=0.1,
                 max_value=first_try_optimal_low,
-                value=min(float(config["first_try"]["multiple_low"]), first_try_optimal_low),
+                value=0.4,  # Используем фиксированное значение вместо обращения к config["first_try"]["multiple_low"]
                 step=0.01,
                 format="%.2f",
                 key="first_try_multiple_low"
             )
             
-            # Обновляем конфигурацию
-            config["first_try"]["too_easy"] = first_try_too_easy
-            config["first_try"]["optimal_low"] = first_try_optimal_low
-            config["first_try"]["multiple_low"] = first_try_multiple_low
+            # Обновляем конфигурацию - не обновляем секцию first_try, так как она больше не используется
+            # config["first_try"]["too_easy"] = first_try_too_easy
+            # config["first_try"]["optimal_low"] = first_try_optimal_low
+            # config["first_try"]["multiple_low"] = first_try_multiple_low
             
             st.markdown("""
             ### Интерпретация параметров успешности:
@@ -925,9 +645,9 @@ def page_admin(df: pd.DataFrame):
             config["complaints"]["high"] = complaints_high
             config["complaints"]["medium"] = complaints_medium
             
-            st.markdown("### Пороги доли пытавшихся решить")
+            st.markdown("### Пороги доли пытавшихся")
             
-            # Интерфейс для редактирования порогов доли пытавшихся решить
+            # Интерфейс для редактирования порогов доли пытавшихся
             attempts_high = st.slider(
                 "Высокая доля пытавшихся (выше этого значения)",
                 min_value=0.8,
@@ -1119,7 +839,7 @@ def page_admin(df: pd.DataFrame):
                 config["weights"]["complaint_rate"],
                 config["weights"]["success_rate"],
                 config["weights"]["discrimination"],
-                config["weights"]["first_try"],
+                config["weights"]["trickiness"],  # Заменяем first_try на trickiness
                 config["weights"]["attempted"]
             ])
             
@@ -1154,10 +874,10 @@ def page_admin(df: pd.DataFrame):
             )
             
             first_try_weight = st.slider(
-                "Вес успешности с первой попытки",
-                min_value=0.05,
-                max_value=0.5,
-                value=float(config["weights"]["first_try"]),
+                "Вес метрики 'трики' (подлость карточки)",
+                min_value=0.0,
+                max_value=1.0,
+                value=float(config["weights"]["trickiness"]),  # Заменяем first_try на trickiness
                 step=0.05,
                 format="%.2f",
                 key="first_try_weight"
@@ -1193,12 +913,12 @@ def page_admin(df: pd.DataFrame):
             config["weights"]["complaint_rate"] = complaint_weight
             config["weights"]["success_rate"] = success_weight
             config["weights"]["discrimination"] = discrimination_weight
-            config["weights"]["first_try"] = first_try_weight
+            config["weights"]["trickiness"] = first_try_weight  # Заменяем first_try на trickiness
             config["weights"]["attempted"] = attempted_weight
             
             # Визуализация весов в виде круговой диаграммы
             weights_df = pd.DataFrame({
-                "Метрика": ["Жалобы", "Успешность", "Дискриминативность", "Первая попытка", "Доля пытавшихся"],
+                "Метрика": ["Жалобы", "Успешность", "Дискриминативность", "Метрика 'трики'", "Доля пытавшихся"],
                 "Вес": [complaint_weight, success_weight, discrimination_weight, first_try_weight, attempted_weight]
             })
             
@@ -1939,11 +1659,11 @@ def page_admin(df: pd.DataFrame):
                             return 1.0 - normalized * 0.49
                     
                     def success_rate_risk_score_new(success_rate):
-                        if success_rate > config["success_rate"]["boring"]:
-                            normalized = min(1.0, (success_rate - config["success_rate"]["boring"]) / 0.05)
-                            return 0.30 + normalized * 0.10
+                        if success_rate > config["success_rate"]["too_easy"]:
+                            normalized = min(1.0, (success_rate - config["success_rate"]["too_easy"]) / 0.1)
+                            return 0.26 + normalized * 0.09
                         elif success_rate >= config["success_rate"]["optimal_low"]:
-                            normalized = (success_rate - config["success_rate"]["optimal_low"]) / (config["success_rate"]["boring"] - config["success_rate"]["optimal_low"])
+                            normalized = (success_rate - config["success_rate"]["optimal_low"]) / (config["success_rate"]["too_easy"] - config["success_rate"]["optimal_low"])
                             return 0.25 * (1 - normalized)
                         elif success_rate >= config["success_rate"]["suboptimal_low"]:
                             normalized = (success_rate - config["success_rate"]["suboptimal_low"]) / (config["success_rate"]["optimal_low"] - config["success_rate"]["suboptimal_low"])
@@ -1952,18 +1672,23 @@ def page_admin(df: pd.DataFrame):
                             normalized = max(0, success_rate / config["success_rate"]["suboptimal_low"])
                             return 1.0 - normalized * 0.49
                     
-                    def first_try_risk_score_new(first_try_success_rate):
-                        if first_try_success_rate > config["first_try"]["too_easy"]:
-                            normalized = min(1.0, (first_try_success_rate - config["first_try"]["too_easy"]) / 0.1)
+                    def trickiness_risk_score_new(trickiness_score):
+                        # Используем фиксированные значения для расчета сложности
+                        too_easy = 0.9
+                        optimal_low = 0.65
+                        multiple_low = 0.4
+                        
+                        if trickiness_score > too_easy:
+                            normalized = min(1.0, (trickiness_score - too_easy) / 0.1)
                             return 0.26 + normalized * 0.09
-                        elif first_try_success_rate >= config["first_try"]["optimal_low"]:
-                            normalized = (first_try_success_rate - config["first_try"]["optimal_low"]) / (config["first_try"]["too_easy"] - config["first_try"]["optimal_low"])
+                        elif trickiness_score >= optimal_low:
+                            normalized = (trickiness_score - optimal_low) / (too_easy - optimal_low)
                             return 0.25 * (1 - normalized)
-                        elif first_try_success_rate >= config["first_try"]["multiple_low"]:
-                            normalized = (first_try_success_rate - config["first_try"]["multiple_low"]) / (config["first_try"]["optimal_low"] - config["first_try"]["multiple_low"])
+                        elif trickiness_score >= multiple_low:
+                            normalized = (trickiness_score - multiple_low) / (optimal_low - multiple_low)
                             return 0.50 - normalized * 0.24
                         else:
-                            normalized = max(0, first_try_success_rate / config["first_try"]["multiple_low"])
+                            normalized = max(0, trickiness_score / multiple_low)
                             return 1.0 - normalized * 0.49
                     
                     def complaint_risk_score_new(row):
@@ -2001,18 +1726,16 @@ def page_admin(df: pd.DataFrame):
                     # Рассчитываем компоненты риска
                     risk_discr = discrimination_risk_score_new(selected_card["discrimination_avg"])
                     risk_success = success_rate_risk_score_new(selected_card["success_rate"])
-                    risk_first_try = first_try_risk_score_new(selected_card["first_try_success_rate"])
                     risk_complaints = complaint_risk_score_new(card_dict)
                     risk_attempted = attempted_share_risk_score_new(selected_card["attempted_share"])
                     
                     # Определяем максимальный риск
-                    max_risk = max(risk_discr, risk_success, risk_first_try, risk_complaints, risk_attempted)
+                    max_risk = max(risk_discr, risk_success, risk_complaints, risk_attempted)
                     
                     # Рассчитываем взвешенное среднее
                     weighted_avg_risk = (
                         config["weights"]["discrimination"] * risk_discr +
                         config["weights"]["success_rate"] * risk_success +
-                        config["weights"]["first_try"] * risk_first_try +
                         config["weights"]["complaint_rate"] * risk_complaints +
                         config["weights"]["attempted"] * risk_attempted
                     )
@@ -2050,7 +1773,6 @@ def page_admin(df: pd.DataFrame):
                     risks = {
                         "Дискриминативность": risk_discr,
                         "Успешность": risk_success,
-                        "Успешность с первой попытки": risk_first_try,
                         "Количество жалоб": risk_complaints,
                         "Доля пытавшихся": risk_attempted
                     }
@@ -2087,7 +1809,6 @@ def page_admin(df: pd.DataFrame):
                         "Вес": [
                             config["weights"]["discrimination"],
                             config["weights"]["success_rate"],
-                            config["weights"]["first_try"],
                             config["weights"]["complaint_rate"],
                             config["weights"]["attempted"]
                         ]
@@ -2238,11 +1959,11 @@ def page_admin(df: pd.DataFrame):
                 return 1.0 - normalized * 0.49
         
         def demo_get_success_risk(val):
-            if val > config["success_rate"]["boring"]:
-                normalized = min(1.0, (val - config["success_rate"]["boring"]) / 0.05)
-                return 0.30 + normalized * 0.10
+            if val > config["success_rate"]["too_easy"]:
+                normalized = min(1.0, (val - config["success_rate"]["too_easy"]) / 0.1)
+                return 0.26 + normalized * 0.09
             elif val >= config["success_rate"]["optimal_low"]:
-                normalized = (val - config["success_rate"]["optimal_low"]) / (config["success_rate"]["boring"] - config["success_rate"]["optimal_low"])
+                normalized = (val - config["success_rate"]["optimal_low"]) / (config["success_rate"]["too_easy"] - config["success_rate"]["optimal_low"])
                 return 0.25 * (1 - normalized)
             elif val >= config["success_rate"]["suboptimal_low"]:
                 normalized = (val - config["success_rate"]["suboptimal_low"]) / (config["success_rate"]["optimal_low"] - config["success_rate"]["suboptimal_low"])
@@ -2252,17 +1973,22 @@ def page_admin(df: pd.DataFrame):
                 return 1.0 - normalized * 0.49
         
         def demo_get_first_try_risk(val):
-            if val > config["first_try"]["too_easy"]:
-                normalized = min(1.0, (val - config["first_try"]["too_easy"]) / 0.1)
+            # Используем фиксированные значения вместо обращения к config["first_try"]
+            too_easy = 0.9
+            optimal_low = 0.65
+            multiple_low = 0.4
+            
+            if val > too_easy:
+                normalized = min(1.0, (val - too_easy) / 0.1)
                 return 0.26 + normalized * 0.09
-            elif val >= config["first_try"]["optimal_low"]:
-                normalized = (val - config["first_try"]["optimal_low"]) / (config["first_try"]["too_easy"] - config["first_try"]["optimal_low"])
+            elif val >= optimal_low:
+                normalized = (val - optimal_low) / (too_easy - optimal_low)
                 return 0.25 * (1 - normalized)
-            elif val >= config["first_try"]["multiple_low"]:
-                normalized = (val - config["first_try"]["multiple_low"]) / (config["first_try"]["optimal_low"] - config["first_try"]["multiple_low"])
+            elif val >= multiple_low:
+                normalized = (val - multiple_low) / (optimal_low - multiple_low)
                 return 0.50 - normalized * 0.24
             else:
-                normalized = max(0, val / config["first_try"]["multiple_low"])
+                normalized = max(0, val / multiple_low)
                 return 1.0 - normalized * 0.49
         
         def demo_get_complaints_risk(val):
@@ -2302,13 +2028,12 @@ def page_admin(df: pd.DataFrame):
         risk_attempts = demo_get_attempts_risk(demo_attempts)
         
         # Рассчитываем максимальный риск
-        max_risk = max(risk_discr, risk_success, risk_first_try, risk_complaints, risk_attempts)
+        max_risk = max(risk_discr, risk_success, risk_complaints, risk_attempts)
         
         # Рассчитываем взвешенное среднее
         weighted_avg = (
             config["weights"]["discrimination"] * risk_discr +
             config["weights"]["success_rate"] * risk_success +
-            config["weights"]["first_try"] * risk_first_try +
             config["weights"]["complaint_rate"] * risk_complaints +
             config["weights"]["attempted"] * risk_attempts
         )
@@ -2332,7 +2057,7 @@ def page_admin(df: pd.DataFrame):
         # Вычисляем вклад каждой метрики во взвешенное среднее
         contribution_discr = config["weights"]["discrimination"] * risk_discr / weighted_avg if weighted_avg > 0 else 0
         contribution_success = config["weights"]["success_rate"] * risk_success / weighted_avg if weighted_avg > 0 else 0
-        contribution_first_try = config["weights"]["first_try"] * risk_first_try / weighted_avg if weighted_avg > 0 else 0
+        contribution_first_try = config["weights"]["attempted"] * risk_first_try / weighted_avg if weighted_avg > 0 else 0
         contribution_complaints = config["weights"]["complaint_rate"] * risk_complaints / weighted_avg if weighted_avg > 0 else 0
         contribution_attempts = config["weights"]["attempted"] * risk_attempts / weighted_avg if weighted_avg > 0 else 0
         
@@ -2341,20 +2066,18 @@ def page_admin(df: pd.DataFrame):
             
             # Создаем датафрейм для отображения рисков по метрикам
             risks_df = pd.DataFrame({
-                "Метрика": ["Дискриминативность", "Успешность", "Успех с 1-й попытки", "Количество жалоб", "Доля пытавшихся"],
-                "Значение": [demo_discr, demo_success, demo_first_try, demo_complaints, demo_attempts],
-                "Риск": [risk_discr, risk_success, risk_first_try, risk_complaints, risk_attempts],
+                "Метрика": ["Дискриминативность", "Успешность", "Количество жалоб", "Доля пытавшихся"],
+                "Значение": [demo_discr, demo_success, demo_complaints, demo_attempts],
+                "Риск": [risk_discr, risk_success, risk_complaints, risk_attempts],
                 "Вес": [
                     config["weights"]["discrimination"],
                     config["weights"]["success_rate"],
-                    config["weights"]["first_try"],
                     config["weights"]["complaint_rate"],
                     config["weights"]["attempted"]
                 ],
                 "Взвешенный риск": [
                     config["weights"]["discrimination"] * risk_discr,
                     config["weights"]["success_rate"] * risk_success,
-                    config["weights"]["first_try"] * risk_first_try,
                     config["weights"]["complaint_rate"] * risk_complaints,
                     config["weights"]["attempted"] * risk_attempts
                 ]
@@ -2407,10 +2130,12 @@ def page_admin(df: pd.DataFrame):
             with col1:
                 st.markdown("#### Промежуточные значения:")
                 st.markdown(f"**Взвешенное среднее:** {weighted_avg:.3f}")
-                st.markdown(f"<span style='color:gray; font-size:0.9em'>= ({config['weights']['discrimination']:.3f} × {risk_discr:.3f}) + ({config['weights']['success_rate']:.3f} × {risk_success:.3f}) + ({config['weights']['first_try']:.3f} × {risk_first_try:.3f}) + ({config['weights']['complaint_rate']:.3f} × {risk_complaints:.3f}) + ({config['weights']['attempted']:.3f} × {risk_attempts:.3f})</span>", unsafe_allow_html=True)
+                st.markdown(f"<span style='color:gray; font-size:0.9em'>= ({config['weights']['discrimination']:.3f} × {risk_discr:.3f}) + ({config['weights']['success_rate']:.3f} × {risk_success:.3f}) + ({config['weights']['complaint_rate']:.3f} × {risk_complaints:.3f}) + ({config['weights']['attempted']:.3f} × {risk_attempts:.3f})</span>", unsafe_allow_html=True)
+                
+                st.markdown(f"<span style='color:gray; font-size:0.9em'>= ({config['weights']['discrimination']:.3f} × {risk_discr:.3f}) + ({config['weights']['success_rate']:.3f} × {risk_success:.3f}) + ({config['weights']['complaint_rate']:.3f} × {risk_complaints:.3f}) + ({config['weights']['trickiness']:.3f} × {risk_attempts:.3f})</span>", unsafe_allow_html=True)
                 
                 st.markdown(f"**Максимальный риск:** {max_risk:.3f}")
-                st.markdown(f"<span style='color:gray; font-size:0.9em'>= max({risk_discr:.3f}, {risk_success:.3f}, {risk_first_try:.3f}, {risk_complaints:.3f}, {risk_attempts:.3f})</span>", unsafe_allow_html=True)
+                st.markdown(f"<span style='color:gray; font-size:0.9em'>= max({risk_discr:.3f}, {risk_success:.3f}, {risk_complaints:.3f}, {risk_attempts:.3f})</span>", unsafe_allow_html=True)
                 
                 st.markdown(f"**Минимальный порог:** {min_threshold:.3f}")
                 min_threshold_explanation = ""
@@ -2507,7 +2232,6 @@ def page_admin(df: pd.DataFrame):
             "Доля в общем риске": [
                 f"{contribution_discr*100:.1f}%",
                 f"{contribution_success*100:.1f}%",
-                f"{contribution_first_try*100:.1f}%",
                 f"{contribution_complaints*100:.1f}%",
                 f"{contribution_attempts*100:.1f}%"
             ]
@@ -2532,7 +2256,7 @@ def page_admin(df: pd.DataFrame):
         
         # Строка расчета комбинированного риска
         st.markdown(f"""
-        **Максимальный риск** = max({', '.join([f"{r:.2f}" for r in [risk_discr, risk_success, risk_first_try, risk_complaints, risk_attempts]])}) = **{max_risk:.3f}**
+        **Максимальный риск** = max({', '.join([f"{r:.2f}" for r in [risk_discr, risk_success, risk_complaints, risk_attempts]])}) = **{max_risk:.3f}**
         
         **Комбинированный риск** = {config["risk_thresholds"]["alpha_weight_avg"]:.2f} × {weighted_avg:.3f} + (1 - {config["risk_thresholds"]["alpha_weight_avg"]:.2f}) × {max_risk:.3f} = **{combined_risk:.3f}**
         """)

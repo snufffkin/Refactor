@@ -7,7 +7,8 @@
         "boring": 0.95,
         "optimal_high": 0.95,
         "optimal_low": 0.75,
-        "suboptimal_low": 0.5
+        "suboptimal_low": 0.5,
+        "too_easy": 0.95
     },
     "complaints": {
         "critical": 50,
