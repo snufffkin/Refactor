@@ -12,8 +12,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 import core
-from core_config import get_config, save_config
-config = get_config()
+from core_config import get_config
 
 def page_admin(df: pd.DataFrame):
     """Страница администрирования конфигурации расчета риска"""
@@ -193,60 +192,12 @@ def page_admin(df: pd.DataFrame):
         
         # Добавляем разделитель
         st.markdown("---")
+    
     # Путь к файлу конфигурации
     config_path = "risk_config.json"
     
-    # Загрузка конфигурации, если файл существует
-    if os.path.exists(config_path):
-        with open(config_path, 'r', encoding='utf-8') as file:
-            config = json.load(file)
-    else:
-        # Создание конфигурации по умолчанию из текущих значений в core.py
-        config = {
-            "discrimination": {
-                "good": core.DISCRIMINATION_GOOD,
-                "medium": core.DISCRIMINATION_MEDIUM
-            },
-            "success_rate": {
-                "boring": core.SUCCESS_BORING,
-                "optimal_high": core.SUCCESS_OPTIMAL_HIGH,
-                "optimal_low": core.SUCCESS_OPTIMAL_LOW,
-                "suboptimal_low": core.SUCCESS_SUBOPTIMAL_LOW
-            },
-            "first_try": {
-                "too_easy": core.FIRST_TRY_TOO_EASY,
-                "optimal_low": core.FIRST_TRY_OPTIMAL_LOW,
-                "multiple_low": core.FIRST_TRY_MULTIPLE_LOW
-            },
-            "complaints": {
-                "critical": core.COMPLAINTS_CRITICAL,
-                "high": core.COMPLAINTS_HIGH,
-                "medium": core.COMPLAINTS_MEDIUM
-            },
-            "attempts": {
-                "high": core.ATTEMPTS_HIGH,
-                "normal_low": core.ATTEMPTS_NORMAL_LOW,
-                "insufficient_low": core.ATTEMPTS_INSUFFICIENT_LOW
-            },
-            "weights": {
-                "complaint_rate": core.WEIGHT_COMPLAINT_RATE,
-                "success_rate": core.WEIGHT_SUCCESS_RATE,
-                "discrimination": core.WEIGHT_DISCRIMINATION,
-                "first_try": core.WEIGHT_FIRST_TRY,
-                "attempted": core.WEIGHT_ATTEMPTED
-            },
-            "risk_thresholds": {
-                "critical": core.RISK_CRITICAL_THRESHOLD,
-                "high": core.RISK_HIGH_THRESHOLD,
-                "min_for_critical": core.MIN_RISK_FOR_CRITICAL,
-                "min_for_high": core.MIN_RISK_FOR_HIGH,
-                "alpha_weight_avg": core.ALPHA_WEIGHT_AVG
-            },
-            "stats": {
-                "significance_threshold": core.STATS_SIGNIFICANCE_THRESHOLD,
-                "neutral_risk_value": core.NEUTRAL_RISK_VALUE
-            }
-        }
+    # Загрузка конфигурации из текущих значений через get_config()
+    config = get_config()
     
     st.markdown("""
     Эта страница позволяет настраивать параметры для вычисления риска карточек.
@@ -1312,30 +1263,7 @@ def page_admin(df: pd.DataFrame):
     
     # Кнопка сохранения конфигурации
     st.markdown("---")
-    
-    col1, col2 = st.columns([1, 3])
-    
-    with col1:
-        if st.button("💾 Сохранить конфигурацию", type="primary"):
-            # Сохраняем конфигурацию с использованием функции из core_config
-            if save_config(config):
-                st.success("Конфигурация успешно сохранена и будет применяться к расчетам риска!")
-            else:
-                st.error("Ошибка при сохранении конфигурации.")
 
-    with col2:
-        # Отображаем структуру конфигурации
-        if st.checkbox("Показать JSON конфигурации"):
-            st.code(json.dumps(config, indent=4, ensure_ascii=False), language="json")
-    
-    
-    # Добавляем разделитель
-    st.markdown("---")
-    """
-
-    # И добавляем код для спойлера с описанием формулы:
-    """
-    # Добавляем раскрывающийся спойлер с описанием формулы риска
     with st.expander("📖 Подробное описание формулы риска", expanded=False):
         st.subheader("Как работает формула расчета риска")
         
@@ -1778,16 +1706,18 @@ def page_admin(df: pd.DataFrame):
         
         **Итоговый риск** = {raw_risk:.3f} × {confidence:.2f} + {config["stats"]["neutral_risk_value"]:.2f} × (1 - {confidence:.2f}) = **{final_risk:.3f}**
         """)
-        
-
-
-    # Теперь добавляем вкладки для настройки конфигурации
-    # Создаем вкладки для разных групп параметров
-    tabs = st.tabs([
-        "📊 Метрики дискриминативности", 
-        "✅ Метрики успешности", 
-        "⚠️ Метрики жалоб",
-        "🔄 Настройки весов", 
-        "📈 Тестирование"
-    ])
     
+    col1, col2 = st.columns([1, 3])
+    
+    with col1:
+        if st.button("💾 Сохранить конфигурацию", type="primary"):
+            # Сохраняем конфигурацию с использованием функции из core_config
+            if core.core_config.save_config(config):
+                st.success("Конфигурация успешно сохранена и будет применяться к расчетам риска!")
+            else:
+                st.error("Ошибка при сохранении конфигурации.")
+
+    with col2:
+        # Отображаем структуру конфигурации
+        if st.checkbox("Показать JSON конфигурации"):
+            st.code(json.dumps(config, indent=4, ensure_ascii=False), language="json")
