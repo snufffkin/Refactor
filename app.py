@@ -74,7 +74,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Кэшируем только данные, но не engine
-@st.cache_data(ttl=60)  # Уменьшаем время кэширования до 1 минуты
+@st.cache_data(ttl=3600)  # Уменьшаем время кэширования до 1 часа
 def load_cached_data(_engine):
     """Загружает и кэширует данные из базы данных"""
     data = core.load_data(_engine)

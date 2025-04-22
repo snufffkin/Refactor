@@ -37,7 +37,7 @@
         "min_for_critical": 0.6,
         "min_for_high": 0.4,
         "alpha_weight_avg": 0.7,
-        "use_min_threshold": true
+        "use_min_threshold": false
     },
     "stats": {
         "significance_threshold": 100,

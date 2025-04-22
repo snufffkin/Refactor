@@ -50,7 +50,7 @@ DEFAULT_CONFIG = {
         "min_for_critical": 0.60,
         "min_for_high": 0.40,
         "alpha_weight_avg": 0.7,
-        "use_min_threshold": True  # Новый параметр для включения/отключения минимального порога
+        "use_min_threshold": False  # Новый параметр для включения/отключения минимального порога
     },
     "stats": {
         "significance_threshold": 100,
