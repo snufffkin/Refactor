@@ -1972,6 +1972,62 @@ def page_admin(df: pd.DataFrame):
                 normalized = max(0, val / config["success_rate"]["suboptimal_low"])
                 return 1.0 - normalized * 0.49
         
+        def demo_get_trickiness_risk(success_rate, first_try_rate):
+            """
+            Рассчитывает риск (0-1) на основе уровня "подлости" карточки.
+            
+            Args:
+                success_rate: Общая успешность
+                first_try_rate: Успешность с первой попытки
+                
+            Returns:
+                float: Значение риска от 0 до 1
+            """
+            # Получаем параметры трики-карточек из конфигурации
+            tricky_config = tricky_config = {
+                "basic": {
+                    "min_success_rate": 0.70,
+                    "max_first_try_rate": 0.60,
+                    "min_difference": 0.20
+                },
+                "zones": {
+                    "high_success_threshold": 0.90,
+                    "medium_success_threshold": 0.80,
+                    "low_first_try_threshold": 0.40,
+                    "medium_first_try_threshold": 0.50
+                }
+            }
+            
+            # Если в конфигурации есть секция для трики-карточек, используем ее
+            if "tricky_cards" in config:
+                tricky_config = config["tricky_cards"]
+            
+            # Вычисляем разницу между общей успешностью и успехом с первой попытки
+            success_diff = success_rate - first_try_rate
+            
+            # Проверяем базовые критерии трики-карточки
+            is_tricky = (
+                (success_rate >= tricky_config["basic"]["min_success_rate"]) and 
+                (first_try_rate <= tricky_config["basic"]["max_first_try_rate"]) and
+                (success_diff >= tricky_config["basic"]["min_difference"])
+            )
+            
+            # Если не является трики-карточкой, возвращаем 0
+            if not is_tricky:
+                return 0.0
+            
+            # Определяем уровень подлости
+            if (success_rate >= tricky_config["zones"]["high_success_threshold"] and 
+                first_try_rate <= tricky_config["zones"]["low_first_try_threshold"]):
+                return 0.9  # Высокий уровень подлости
+            
+            elif (success_rate >= tricky_config["zones"]["medium_success_threshold"] and
+                first_try_rate <= tricky_config["zones"]["medium_first_try_threshold"]):
+                return 0.6  # Средний уровень подлости
+            
+            else:
+                return 0.3  # Низкий уровень подлости
+        
         def demo_get_first_try_risk(val):
             # Используем фиксированные значения вместо обращения к config["first_try"]
             too_easy = 0.9
@@ -2023,17 +2079,18 @@ def page_admin(df: pd.DataFrame):
         # Рассчитываем риски для каждой метрики
         risk_discr = demo_get_discr_risk(demo_discr)
         risk_success = demo_get_success_risk(demo_success)
-        risk_first_try = demo_get_first_try_risk(demo_first_try)
+        risk_trickiness = demo_get_trickiness_risk(demo_success, demo_first_try)
         risk_complaints = demo_get_complaints_risk(demo_complaints)
         risk_attempts = demo_get_attempts_risk(demo_attempts)
         
         # Рассчитываем максимальный риск
-        max_risk = max(risk_discr, risk_success, risk_complaints, risk_attempts)
+        max_risk = max(risk_discr, risk_success, risk_complaints, risk_attempts, risk_trickiness)
         
         # Рассчитываем взвешенное среднее
         weighted_avg = (
             config["weights"]["discrimination"] * risk_discr +
             config["weights"]["success_rate"] * risk_success +
+            config["weights"]["trickiness"] * risk_trickiness +  # Используем trickiness вместо first_try
             config["weights"]["complaint_rate"] * risk_complaints +
             config["weights"]["attempted"] * risk_attempts
         )
@@ -2057,27 +2114,30 @@ def page_admin(df: pd.DataFrame):
         # Вычисляем вклад каждой метрики во взвешенное среднее
         contribution_discr = config["weights"]["discrimination"] * risk_discr / weighted_avg if weighted_avg > 0 else 0
         contribution_success = config["weights"]["success_rate"] * risk_success / weighted_avg if weighted_avg > 0 else 0
-        contribution_first_try = config["weights"]["attempted"] * risk_first_try / weighted_avg if weighted_avg > 0 else 0
+        contribution_trickiness = config["weights"]["trickiness"] * risk_trickiness / weighted_avg if weighted_avg > 0 else 0
         contribution_complaints = config["weights"]["complaint_rate"] * risk_complaints / weighted_avg if weighted_avg > 0 else 0
         contribution_attempts = config["weights"]["attempted"] * risk_attempts / weighted_avg if weighted_avg > 0 else 0
+
         
         with demo_col2:
             st.markdown("### Результат расчета риска")
             
             # Создаем датафрейм для отображения рисков по метрикам
             risks_df = pd.DataFrame({
-                "Метрика": ["Дискриминативность", "Успешность", "Количество жалоб", "Доля пытавшихся"],
-                "Значение": [demo_discr, demo_success, demo_complaints, demo_attempts],
-                "Риск": [risk_discr, risk_success, risk_complaints, risk_attempts],
+                "Метрика": ["Дискриминативность", "Успешность", "Подлость", "Количество жалоб", "Доля пытавшихся"],
+                "Значение": [demo_discr, demo_success, f"{demo_success:.2f}/{demo_first_try:.2f}", demo_complaints, demo_attempts],
+                "Риск": [risk_discr, risk_success, risk_trickiness, risk_complaints, risk_attempts],
                 "Вес": [
                     config["weights"]["discrimination"],
                     config["weights"]["success_rate"],
+                    config["weights"]["trickiness"],  # Используем вес для trickiness
                     config["weights"]["complaint_rate"],
                     config["weights"]["attempted"]
                 ],
                 "Взвешенный риск": [
                     config["weights"]["discrimination"] * risk_discr,
                     config["weights"]["success_rate"] * risk_success,
+                    config["weights"]["trickiness"] * risk_trickiness,  # Используем trickiness
                     config["weights"]["complaint_rate"] * risk_complaints,
                     config["weights"]["attempted"] * risk_attempts
                 ]
@@ -2200,13 +2260,13 @@ def page_admin(df: pd.DataFrame):
         
         # Создаем таблицу с примерами преобразования метрик в риск
         metrics_examples = pd.DataFrame({
-            "Метрика": ["Дискриминативность", "Успешность", "Успех с 1-й попытки", "Количество жалоб", "Доля пытавшихся"],
-            "Значение": [demo_discr, demo_success, demo_first_try, demo_complaints, demo_attempts],
-            "Риск": [risk_discr, risk_success, risk_first_try, risk_complaints, risk_attempts],
+            "Метрика": ["Дискриминативность", "Успешность", "Подлость", "Количество жалоб", "Доля пытавшихся"],
+            "Значение": [demo_discr, demo_success, f"{demo_success:.2f}/{demo_first_try:.2f}", demo_complaints, demo_attempts],
+            "Риск": [risk_discr, risk_success, risk_trickiness, risk_complaints, risk_attempts],
             "Формула преобразования": [
                 "Хорошая: >0.35, Средняя: 0.15-0.35, Низкая: <0.15", 
                 "Скучная: >0.95, Оптимальная: 0.75-0.95, Субоптимальная: 0.50-0.75, Фрустрирующая: <0.50",
-                "Слишком простая: >0.90, Оптимальная: 0.65-0.90, Требует попыток: 0.40-0.65, Сложная: <0.40",
+                "Высокий: общая успешность ≥0.90, успех с 1-й попытки ≤0.40\nСредний: общая успешность ≥0.80, успех с 1-й попытки ≤0.50\nНизкий: успешность ≥0.70, разница ≥0.20",
                 f"Критическое: >{config['complaints']['critical']}, Высокое: {config['complaints']['high']}-{config['complaints']['critical']}, Среднее: {config['complaints']['medium']}-{config['complaints']['high']}, Низкое: <{config['complaints']['medium']}",
                 "Высокая: >0.95, Нормальная: 0.80-0.95, Недостаточная: 0.60-0.80, Игнорируемая: <0.60"
             ]
@@ -2232,6 +2292,7 @@ def page_admin(df: pd.DataFrame):
             "Доля в общем риске": [
                 f"{contribution_discr*100:.1f}%",
                 f"{contribution_success*100:.1f}%",
+                f"{contribution_trickiness*100:.1f}%",
                 f"{contribution_complaints*100:.1f}%",
                 f"{contribution_attempts*100:.1f}%"
             ]
@@ -2255,9 +2316,11 @@ def page_admin(df: pd.DataFrame):
         """)
         
         # Строка расчета комбинированного риска
+        risk_values = [risk_discr, risk_success, risk_trickiness, risk_complaints, risk_attempts]
+        risk_str = ', '.join([f"{r:.2f}" for r in risk_values])
+        st.markdown(f"**Максимальный риск** = max({risk_str}) = **{max_risk:.3f}**")
+
         st.markdown(f"""
-        **Максимальный риск** = max({', '.join([f"{r:.2f}" for r in [risk_discr, risk_success, risk_complaints, risk_attempts]])}) = **{max_risk:.3f}**
-        
         **Комбинированный риск** = {config["risk_thresholds"]["alpha_weight_avg"]:.2f} × {weighted_avg:.3f} + (1 - {config["risk_thresholds"]["alpha_weight_avg"]:.2f}) × {max_risk:.3f} = **{combined_risk:.3f}**
         """)
         
