@@ -1909,13 +1909,15 @@ def page_admin(df: pd.DataFrame):
                 key="demo_success"
             )
             
-            demo_first_try = st.slider(
-                "Успешность с 1-й попытки",
+            # Заменяем слайдер для успешности с первой попытки на слайдер для подлости
+            demo_trickiness = st.slider(
+                "Уровень подлости",
                 min_value=0.0,
-                max_value=1.0,
-                value=0.7,
-                step=0.05,
-                key="demo_first_try"
+                max_value=3.0,
+                value=1.0,
+                step=0.5,
+                key="demo_trickiness",
+                help="0 - нет подлости, 1 - низкий, 2 - средний, 3 - высокий"
             )
             
             demo_complaints = st.number_input(
@@ -1957,7 +1959,7 @@ def page_admin(df: pd.DataFrame):
             else:
                 normalized = max(0, val / config["discrimination"]["medium"])
                 return 1.0 - normalized * 0.49
-        
+
         def demo_get_success_risk(val):
             if val > config["success_rate"]["too_easy"]:
                 normalized = min(1.0, (val - config["success_rate"]["too_easy"]) / 0.1)
@@ -1972,61 +1974,26 @@ def page_admin(df: pd.DataFrame):
                 normalized = max(0, val / config["success_rate"]["suboptimal_low"])
                 return 1.0 - normalized * 0.49
         
-        def demo_get_trickiness_risk(success_rate, first_try_rate):
+        def demo_get_trickiness_risk(trickiness_level):
             """
             Рассчитывает риск (0-1) на основе уровня "подлости" карточки.
             
             Args:
-                success_rate: Общая успешность
-                first_try_rate: Успешность с первой попытки
+                trickiness_level: Числовой уровень подлости (0-3)
                 
             Returns:
                 float: Значение риска от 0 до 1
             """
-            # Получаем параметры трики-карточек из конфигурации
-            tricky_config = tricky_config = {
-                "basic": {
-                    "min_success_rate": 0.70,
-                    "max_first_try_rate": 0.60,
-                    "min_difference": 0.20
-                },
-                "zones": {
-                    "high_success_threshold": 0.90,
-                    "medium_success_threshold": 0.80,
-                    "low_first_try_threshold": 0.40,
-                    "medium_first_try_threshold": 0.50
-                }
-            }
-            
-            # Если в конфигурации есть секция для трики-карточек, используем ее
-            if "tricky_cards" in config:
-                tricky_config = config["tricky_cards"]
-            
-            # Вычисляем разницу между общей успешностью и успехом с первой попытки
-            success_diff = success_rate - first_try_rate
-            
-            # Проверяем базовые критерии трики-карточки
-            is_tricky = (
-                (success_rate >= tricky_config["basic"]["min_success_rate"]) and 
-                (first_try_rate <= tricky_config["basic"]["max_first_try_rate"]) and
-                (success_diff >= tricky_config["basic"]["min_difference"])
-            )
-            
-            # Если не является трики-карточкой, возвращаем 0
-            if not is_tricky:
-                return 0.0
-            
-            # Определяем уровень подлости
-            if (success_rate >= tricky_config["zones"]["high_success_threshold"] and 
-                first_try_rate <= tricky_config["zones"]["low_first_try_threshold"]):
-                return 0.9  # Высокий уровень подлости
-            
-            elif (success_rate >= tricky_config["zones"]["medium_success_threshold"] and
-                first_try_rate <= tricky_config["zones"]["medium_first_try_threshold"]):
-                return 0.6  # Средний уровень подлости
-            
+            # В зависимости от уровня подлости назначаем риск
+            if trickiness_level == 0:
+                return 0.0  # Нет риска, если карточка не является "трики"
+            elif trickiness_level <= 1:
+                return 0.3  # Низкий уровень риска для низкой подлости
+            elif trickiness_level <= 2:
+                return 0.6  # Средний уровень риска для средней подлости
             else:
-                return 0.3  # Низкий уровень подлости
+                return 0.9  # Высокий уровень риска для высокой подлости
+            
         
         def demo_get_first_try_risk(val):
             # Используем фиксированные значения вместо обращения к config["first_try"]
@@ -2079,7 +2046,7 @@ def page_admin(df: pd.DataFrame):
         # Рассчитываем риски для каждой метрики
         risk_discr = demo_get_discr_risk(demo_discr)
         risk_success = demo_get_success_risk(demo_success)
-        risk_trickiness = demo_get_trickiness_risk(demo_success, demo_first_try)
+        risk_trickiness = demo_get_trickiness_risk(demo_trickiness)  # Используем новую функцию для расчета подлости
         risk_complaints = demo_get_complaints_risk(demo_complaints)
         risk_attempts = demo_get_attempts_risk(demo_attempts)
         
@@ -2105,12 +2072,12 @@ def page_admin(df: pd.DataFrame):
         
         # Применяем комбинированную формулу
         combined_risk = config["risk_thresholds"]["alpha_weight_avg"] * weighted_avg + (1 - config["risk_thresholds"]["alpha_weight_avg"]) * max_risk
-        raw_risk = max(weighted_avg, combined_risk, min_threshold)
+        raw_risk = max(weighted_avg, combined_risk)
         
         # Корректировка на статистическую значимость
         confidence = min(demo_total_attempts / config["stats"]["significance_threshold"], 1.0)
         final_risk = raw_risk * confidence + config["stats"]["neutral_risk_value"] * (1 - confidence)
-        
+
         # Вычисляем вклад каждой метрики во взвешенное среднее
         contribution_discr = config["weights"]["discrimination"] * risk_discr / weighted_avg if weighted_avg > 0 else 0
         contribution_success = config["weights"]["success_rate"] * risk_success / weighted_avg if weighted_avg > 0 else 0
@@ -2118,14 +2085,13 @@ def page_admin(df: pd.DataFrame):
         contribution_complaints = config["weights"]["complaint_rate"] * risk_complaints / weighted_avg if weighted_avg > 0 else 0
         contribution_attempts = config["weights"]["attempted"] * risk_attempts / weighted_avg if weighted_avg > 0 else 0
 
-        
         with demo_col2:
             st.markdown("### Результат расчета риска")
             
             # Создаем датафрейм для отображения рисков по метрикам
             risks_df = pd.DataFrame({
                 "Метрика": ["Дискриминативность", "Успешность", "Подлость", "Количество жалоб", "Доля пытавшихся"],
-                "Значение": [demo_discr, demo_success, f"{demo_success:.2f}/{demo_first_try:.2f}", demo_complaints, demo_attempts],
+                "Значение": [demo_discr, demo_success, demo_trickiness, demo_complaints, demo_attempts],
                 "Риск": [risk_discr, risk_success, risk_trickiness, risk_complaints, risk_attempts],
                 "Вес": [
                     config["weights"]["discrimination"],
@@ -2190,28 +2156,16 @@ def page_admin(df: pd.DataFrame):
             with col1:
                 st.markdown("#### Промежуточные значения:")
                 st.markdown(f"**Взвешенное среднее:** {weighted_avg:.3f}")
-                st.markdown(f"<span style='color:gray; font-size:0.9em'>= ({config['weights']['discrimination']:.3f} × {risk_discr:.3f}) + ({config['weights']['success_rate']:.3f} × {risk_success:.3f}) + ({config['weights']['complaint_rate']:.3f} × {risk_complaints:.3f}) + ({config['weights']['attempted']:.3f} × {risk_attempts:.3f})</span>", unsafe_allow_html=True)
-                
-                st.markdown(f"<span style='color:gray; font-size:0.9em'>= ({config['weights']['discrimination']:.3f} × {risk_discr:.3f}) + ({config['weights']['success_rate']:.3f} × {risk_success:.3f}) + ({config['weights']['complaint_rate']:.3f} × {risk_complaints:.3f}) + ({config['weights']['trickiness']:.3f} × {risk_attempts:.3f})</span>", unsafe_allow_html=True)
+                st.markdown(f"<span style='color:gray; font-size:0.9em'>= ({config['weights']['discrimination']:.3f} × {risk_discr:.3f}) + ({config['weights']['success_rate']:.3f} × {risk_success:.3f}) + ({config['weights']['trickiness']:.3f} × {risk_trickiness:.3f}) + ({config['weights']['complaint_rate']:.3f} × {risk_complaints:.3f}) + ({config['weights']['attempted']:.3f} × {risk_attempts:.3f})</span>", unsafe_allow_html=True)
                 
                 st.markdown(f"**Максимальный риск:** {max_risk:.3f}")
-                st.markdown(f"<span style='color:gray; font-size:0.9em'>= max({risk_discr:.3f}, {risk_success:.3f}, {risk_complaints:.3f}, {risk_attempts:.3f})</span>", unsafe_allow_html=True)
-                
-                st.markdown(f"**Минимальный порог:** {min_threshold:.3f}")
-                min_threshold_explanation = ""
-                if max_risk > config["risk_thresholds"]["critical"]:
-                    min_threshold_explanation = f"= {config['risk_thresholds']['min_for_critical']:.3f} (т.к. max_risk {max_risk:.3f} > critical_threshold {config['risk_thresholds']['critical']:.3f})"
-                elif max_risk > config["risk_thresholds"]["high"]:
-                    min_threshold_explanation = f"= {config['risk_thresholds']['min_for_high']:.3f} (т.к. max_risk {max_risk:.3f} > high_threshold {config['risk_thresholds']['high']:.3f})"
-                else:
-                    min_threshold_explanation = "= 0 (т.к. нет высокого риска)"
-                st.markdown(f"<span style='color:gray; font-size:0.9em'>{min_threshold_explanation}</span>", unsafe_allow_html=True)
+                st.markdown(f"<span style='color:gray; font-size:0.9em'>= max({risk_discr:.3f}, {risk_success:.3f}, {risk_trickiness:.3f}, {risk_complaints:.3f}, {risk_attempts:.3f})</span>", unsafe_allow_html=True)
                 
                 st.markdown(f"**Комбинированный риск:** {combined_risk:.3f}")
                 st.markdown(f"<span style='color:gray; font-size:0.9em'>= ({config['risk_thresholds']['alpha_weight_avg']:.3f} × {weighted_avg:.3f}) + ((1 - {config['risk_thresholds']['alpha_weight_avg']:.3f}) × {max_risk:.3f})</span>", unsafe_allow_html=True)
                 
                 st.markdown(f"**Сырой риск:** {raw_risk:.3f}")
-                st.markdown(f"<span style='color:gray; font-size:0.9em'>= max({weighted_avg:.3f}, {combined_risk:.3f}, {min_threshold:.3f})</span>", unsafe_allow_html=True)
+                st.markdown(f"<span style='color:gray; font-size:0.9em'>= max({weighted_avg:.3f}, {combined_risk:.3f})</span>", unsafe_allow_html=True)
                 
                 st.markdown(f"**Коэффициент доверия:** {confidence:.2f}")
                 st.markdown(f"<span style='color:gray; font-size:0.9em'>= min({demo_total_attempts} / {config['stats']['significance_threshold']}, 1.0) = min({demo_total_attempts/config['stats']['significance_threshold']:.3f}, 1.0)</span>", unsafe_allow_html=True)
@@ -2244,8 +2198,6 @@ def page_admin(df: pd.DataFrame):
                     decision_factor = "взвешенное среднее"
                 elif raw_risk == combined_risk:
                     decision_factor = "комбинированный риск"
-                elif raw_risk == min_threshold:
-                    decision_factor = "минимальный порог из-за высокого риска метрики"
                 
                 st.markdown(f"**Решающий фактор:** {decision_factor}")
         
@@ -2261,7 +2213,7 @@ def page_admin(df: pd.DataFrame):
         # Создаем таблицу с примерами преобразования метрик в риск
         metrics_examples = pd.DataFrame({
             "Метрика": ["Дискриминативность", "Успешность", "Подлость", "Количество жалоб", "Доля пытавшихся"],
-            "Значение": [demo_discr, demo_success, f"{demo_success:.2f}/{demo_first_try:.2f}", demo_complaints, demo_attempts],
+            "Значение": [demo_discr, demo_success, demo_trickiness, demo_complaints, demo_attempts],
             "Риск": [risk_discr, risk_success, risk_trickiness, risk_complaints, risk_attempts],
             "Формула преобразования": [
                 "Хорошая: >0.35, Средняя: 0.15-0.35, Низкая: <0.15", 
