@@ -12,7 +12,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 import core
-from core_config import get_config
+from core_config import get_config, save_config
 
 def page_admin(df: pd.DataFrame):
     """Страница администрирования конфигурации расчета риска"""
@@ -32,7 +32,7 @@ def page_admin(df: pd.DataFrame):
     # Сохраняем изменение параметра в конфигурации
     if use_min_threshold != config["risk_thresholds"].get("use_min_threshold", True):
         config["risk_thresholds"]["use_min_threshold"] = use_min_threshold
-        core.core_config.save_config(config)
+        save_config(config)
         st.success("Параметр минимального порога риска обновлен!")
         
         # Добавляем кнопку для пересчета данных с новыми параметрами
@@ -1737,7 +1737,7 @@ def page_admin(df: pd.DataFrame):
     with col1:
         if st.button("💾 Сохранить конфигурацию", type="primary"):
             # Сохраняем конфигурацию с использованием функции из core_config
-            if core.core_config.save_config(config):
+            if save_config(config):
                 st.success("Конфигурация успешно сохранена и будет применяться к расчетам риска!")
             else:
                 st.error("Ошибка при сохранении конфигурации.")

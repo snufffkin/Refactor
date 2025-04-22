@@ -1,0 +1,46 @@
+{
+    "discrimination": {
+        "good": 0.35,
+        "medium": 0.15
+    },
+    "success_rate": {
+        "boring": 0.95,
+        "optimal_high": 0.95,
+        "optimal_low": 0.75,
+        "suboptimal_low": 0.5
+    },
+    "first_try": {
+        "too_easy": 0.9,
+        "optimal_low": 0.65,
+        "multiple_low": 0.4
+    },
+    "complaints": {
+        "critical": 50,
+        "high": 10,
+        "medium": 5
+    },
+    "attempts": {
+        "high": 0.95,
+        "normal_low": 0.8,
+        "insufficient_low": 0.6
+    },
+    "weights": {
+        "complaint_rate": 0.35,
+        "success_rate": 0.25,
+        "discrimination": 0.2,
+        "first_try": 0.15,
+        "attempted": 0.05
+    },
+    "risk_thresholds": {
+        "critical": 0.75,
+        "high": 0.5,
+        "min_for_critical": 0.6,
+        "min_for_high": 0.4,
+        "alpha_weight_avg": 0.7,
+        "use_min_threshold": true
+    },
+    "stats": {
+        "significance_threshold": 100,
+        "neutral_risk_value": 0.5
+    }
+}
