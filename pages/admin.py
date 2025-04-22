@@ -1112,48 +1112,6 @@ def page_admin(df: pd.DataFrame):
             help="Минимальная разница между общей успешностью и успехом с первой попытки"
         )
         
-        # Добавляем параметры для интервальных зон "подлости"
-        st.sidebar.markdown("### Параметры зон \"подлости\"")
-        
-        high_success_threshold = st.sidebar.slider(
-            "Порог высокой успешности",
-            min_value=0.70,
-            max_value=1.0,
-            value=tricky_config["zones"].get("high_success_threshold", 0.90),
-            step=0.05,
-            format="%.2f",
-            help="Порог общей успешности для высокого уровня 'подлости'"
-        )
-        
-        medium_success_threshold = st.sidebar.slider(
-            "Порог средней успешности",
-            min_value=min_success_rate,
-            max_value=high_success_threshold - 0.05,
-            value=min(tricky_config["zones"].get("medium_success_threshold", 0.80), high_success_threshold - 0.05),
-            step=0.05,
-            format="%.2f",
-            help="Порог общей успешности для среднего уровня 'подлости'"
-        )
-        
-        low_first_try_threshold = st.sidebar.slider(
-            "Порог низкой успешности с 1-й попытки",
-            min_value=0.0,
-            max_value=max_first_try_rate,
-            value=min(tricky_config["zones"].get("low_first_try_threshold", 0.40), max_first_try_rate),
-            step=0.05,
-            format="%.2f",
-            help="Порог успешности с первой попытки для высокого уровня 'подлости'"
-        )
-        
-        medium_first_try_threshold = st.sidebar.slider(
-            "Порог средней успешности с 1-й попытки",
-            min_value=low_first_try_threshold + 0.05,
-            max_value=max_first_try_rate,
-            value=min(tricky_config["zones"].get("medium_first_try_threshold", 0.50), max_first_try_rate),
-            step=0.05,
-            format="%.2f",
-            help="Порог успешности с первой попытки для среднего уровня 'подлости'"
-        )
         
         # Добавляем кнопку для сохранения настроек
         if st.sidebar.button("💾 Сохранить настройки трики-карточек", type="primary"):
