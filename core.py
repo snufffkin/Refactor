@@ -13,6 +13,7 @@ import pandas as pd
 import streamlit as st
 from sqlalchemy import create_engine, text
 
+from core_config import get_config
 # ---------------- DB ------------------------------------------------------- #
 
 def get_engine():
@@ -40,52 +41,6 @@ FILTERS: List[str] = ["program", "module", "lesson", "gz"]  # Добавил "gz
 # Обновленная функция расчета риска на основе интервалов
 # Добавьте эти функции в файл core.py
 
-# ------------------ Конфигурационные параметры -----------------------------
-# Параметры для дискриминативности
-DISCRIMINATION_GOOD = 0.35  # Выше этого значения - хорошая дискриминативность
-DISCRIMINATION_MEDIUM = 0.15  # Между этим и GOOD - средняя, ниже - низкая
-
-# Параметры для успешности
-SUCCESS_BORING = 0.95  # Выше этого значения - скучная задача
-SUCCESS_OPTIMAL_HIGH = 0.95  # Верхняя граница оптимальной успешности
-SUCCESS_OPTIMAL_LOW = 0.75  # Нижняя граница оптимальной успешности
-SUCCESS_SUBOPTIMAL_LOW = 0.50  # Нижняя граница субоптимальной успешности
-# Ниже SUCCESS_SUBOPTIMAL_LOW - фрустрирующая успешность
-
-# Параметры для успешности с первой попытки
-FIRST_TRY_TOO_EASY = 0.90  # Выше этого значения - слишком простая задача
-FIRST_TRY_OPTIMAL_LOW = 0.65  # Нижняя граница оптимальной успешности с первой попытки
-FIRST_TRY_MULTIPLE_LOW = 0.40  # Нижняя граница требующей нескольких попыток
-# Ниже FIRST_TRY_MULTIPLE_LOW - сложная задача
-
-COMPLAINTS_CRITICAL = 50  # Выше этого значения - критический уровень жалоб
-COMPLAINTS_HIGH = 10  # Между этим и CRITICAL - высокий уровень
-COMPLAINTS_MEDIUM = 5  # Между этим и HIGH - средний уровень
-# Ниже COMPLAINTS_MEDIUM - низкий уровень жалоб
-
-# Параметры для доли пытавшихся решить
-ATTEMPTS_HIGH = 0.95  # Выше этого значения - высокая доля пытавшихся
-ATTEMPTS_NORMAL_LOW = 0.80  # Нижняя граница нормальной доли
-ATTEMPTS_INSUFFICIENT_LOW = 0.60  # Нижняя граница недостаточной доли
-# Ниже ATTEMPTS_INSUFFICIENT_LOW - игнорируемая доля
-
-# Веса для метрик
-WEIGHT_COMPLAINT_RATE = 0.35
-WEIGHT_SUCCESS_RATE = 0.25
-WEIGHT_DISCRIMINATION = 0.20
-WEIGHT_FIRST_TRY = 0.15
-WEIGHT_ATTEMPTED = 0.05
-
-# Параметры для комбинирования риска
-ALPHA_WEIGHT_AVG = 0.7  # Вес для взвешенного среднего в комбинированной формуле
-RISK_CRITICAL_THRESHOLD = 0.75  # Риск выше этого значения считается критическим
-RISK_HIGH_THRESHOLD = 0.50  # Риск выше этого значения считается высоким
-MIN_RISK_FOR_CRITICAL = 0.60  # Минимальный порог риска при наличии критической метрики
-MIN_RISK_FOR_HIGH = 0.40  # Минимальный порог риска при наличии высокой риск-метрики
-
-# Параметры для статистической значимости
-STATS_SIGNIFICANCE_THRESHOLD = 100  # Количество попыток для полной статистической значимости
-NEUTRAL_RISK_VALUE = 0.50  # Значение риска к которому смещаемся при малом числе попыток
 
 # ------------------ Вспомогательные функции расчета риска ------------------
 def discrimination_risk_score(discrimination_avg):
@@ -94,7 +49,14 @@ def discrimination_risk_score(discrimination_avg):
     Хорошая: > 0.35 → 0-0.25
     Средняя: 0.15-0.35 → 0.26-0.50
     Низкая: < 0.15 → 0.51-1.0
+    
+    Использует параметры из конфигурации.
     """
+    # Получаем параметры из конфигурации
+    config = get_config()
+    DISCRIMINATION_GOOD = config["discrimination"]["good"]
+    DISCRIMINATION_MEDIUM = config["discrimination"]["medium"]
+    
     if discrimination_avg >= DISCRIMINATION_GOOD:
         # Хорошая дискриминативность (0-0.25)
         # Чем выше значение, тем ниже риск
@@ -117,7 +79,16 @@ def success_rate_risk_score(success_rate):
     Оптимальная: 0.75-0.95 → 0-0.25
     Субоптимальная: 0.50-0.75 → 0.26-0.50
     Фрустрирующая: < 0.50 → 0.51-1.0
+    
+    Использует параметры из конфигурации.
     """
+    # Получаем параметры из конфигурации
+    config = get_config()
+    SUCCESS_BORING = config["success_rate"]["boring"]
+    SUCCESS_OPTIMAL_HIGH = config["success_rate"]["optimal_high"]
+    SUCCESS_OPTIMAL_LOW = config["success_rate"]["optimal_low"]
+    SUCCESS_SUBOPTIMAL_LOW = config["success_rate"]["suboptimal_low"]
+    
     if success_rate > SUCCESS_BORING:
         # Скучная (слишком простая) задача (0.30-0.40)
         normalized = min(1.0, (success_rate - SUCCESS_BORING) / 0.05)
@@ -142,7 +113,15 @@ def first_try_risk_score(first_try_success_rate):
     Оптимальная: 0.65-0.90 → 0-0.25
     Требует нескольких попыток: 0.40-0.65 → 0.26-0.50
     Сложная: < 0.40 → 0.51-1.0
+    
+    Использует параметры из конфигурации.
     """
+    # Получаем параметры из конфигурации
+    config = get_config()
+    FIRST_TRY_TOO_EASY = config["first_try"]["too_easy"]
+    FIRST_TRY_OPTIMAL_LOW = config["first_try"]["optimal_low"]
+    FIRST_TRY_MULTIPLE_LOW = config["first_try"]["multiple_low"]
+    
     if first_try_success_rate > FIRST_TRY_TOO_EASY:
         # Слишком простая задача (0.26-0.35)
         normalized = min(1.0, (first_try_success_rate - FIRST_TRY_TOO_EASY) / 0.1)
@@ -177,7 +156,15 @@ def complaint_risk_score(row):
     --------
     float
         Значение риска от 0 до 1
+        
+    Использует параметры из конфигурации.
     """
+    # Получаем параметры из конфигурации
+    config = get_config()
+    COMPLAINTS_CRITICAL = config["complaints"]["critical"]
+    COMPLAINTS_HIGH = config["complaints"]["high"]
+    COMPLAINTS_MEDIUM = config["complaints"]["medium"]
+    
     # Получаем абсолютное количество жалоб
     complaints_total = row.complaints_total if 'complaints_total' in row else 0
     
@@ -207,7 +194,15 @@ def attempted_share_risk_score(attempted_share):
     Нормальная: 0.80-0.95 → 0-0.25
     Недостаточная: 0.60-0.80 → 0.26-0.50
     Игнорируемая: < 0.60 → 0.51-1.0
+    
+    Использует параметры из конфигурации.
     """
+    # Получаем параметры из конфигурации
+    config = get_config()
+    ATTEMPTS_HIGH = config["attempts"]["high"]
+    ATTEMPTS_NORMAL_LOW = config["attempts"]["normal_low"]
+    ATTEMPTS_INSUFFICIENT_LOW = config["attempts"]["insufficient_low"]
+    
     if attempted_share > ATTEMPTS_HIGH:
         # Высокая доля пытавшихся (0-0.10)
         normalized = min(1.0, (attempted_share - ATTEMPTS_HIGH) / 0.05)
@@ -225,8 +220,7 @@ def attempted_share_risk_score(attempted_share):
         normalized = max(0, attempted_share / ATTEMPTS_INSUFFICIENT_LOW)
         return 1.0 - normalized * 0.49  # 0.51-1.0
 
-
-def risk_score(row: pd.Series) -> float:
+def risk_score(row):
     """
     Расчет показателя риска для карточки на основе интервального подхода.
     
@@ -239,7 +233,26 @@ def risk_score(row: pd.Series) -> float:
     - Общее количество попыток (total_attempts) - как весовой фактор
     
     Возвращает значение от 0 до 1, где 1 - максимальный риск
+    
+    Использует параметры из конфигурации.
     """
+    # Получаем параметры из конфигурации
+    config = get_config()
+    WEIGHT_DISCRIMINATION = config["weights"]["discrimination"]
+    WEIGHT_SUCCESS_RATE = config["weights"]["success_rate"]
+    WEIGHT_FIRST_TRY = config["weights"]["first_try"]
+    WEIGHT_COMPLAINT_RATE = config["weights"]["complaint_rate"]
+    WEIGHT_ATTEMPTED = config["weights"]["attempted"]
+    
+    RISK_CRITICAL_THRESHOLD = config["risk_thresholds"]["critical"]
+    RISK_HIGH_THRESHOLD = config["risk_thresholds"]["high"]
+    MIN_RISK_FOR_CRITICAL = config["risk_thresholds"]["min_for_critical"]
+    MIN_RISK_FOR_HIGH = config["risk_thresholds"]["min_for_high"]
+    ALPHA_WEIGHT_AVG = config["risk_thresholds"]["alpha_weight_avg"]
+    
+    STATS_SIGNIFICANCE_THRESHOLD = config["stats"]["significance_threshold"]
+    NEUTRAL_RISK_VALUE = config["stats"]["neutral_risk_value"]
+    
     # Рассчитываем риск для каждой метрики (0-1)
     risk_discr = discrimination_risk_score(row.discrimination_avg)
     risk_success = success_rate_risk_score(row.success_rate)
@@ -247,7 +260,6 @@ def risk_score(row: pd.Series) -> float:
     risk_complaints = complaint_risk_score(row)  # Передаем всю строку для доступа к complaints_total
     risk_attempted = attempted_share_risk_score(row.attempted_share)
     
-    # Остальная часть функции остается без изменений
     # Определяем максимальный риск
     max_risk = max(risk_discr, risk_success, risk_first_try, risk_complaints, risk_attempted)
     
