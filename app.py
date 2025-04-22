@@ -78,8 +78,13 @@ st.markdown("""
 def load_cached_data(_engine):
     """Загружает и кэширует данные из базы данных"""
     data = core.load_data(_engine)
-    # Применение улучшенной формулы риска
+    
+    # Добавляем расчет уровня "подлости" для каждой карточки
+    data["trickiness_level"] = data.apply(core.get_trickiness_level, axis=1)
+    
+    # Применение улучшенной формулы риска с учетом подлости вместо first_try
     data["risk"] = data.apply(core.risk_score, axis=1)
+    
     return data
 
 # Создаем engine вне кэширования

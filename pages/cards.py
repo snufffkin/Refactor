@@ -14,6 +14,141 @@ from components.utils import create_hierarchical_header, add_gz_links
 from components.metrics import display_metrics_row, display_status_chart, display_risk_distribution
 from components.charts import display_risk_bar_chart, display_metrics_comparison, display_success_complaints_chart, display_completion_radar,display_cards_chart
 
+# Функция для отображения информации об уровне подлости
+def display_trickiness_info(trickiness_level):
+    """
+    Отображает информацию об уровне подлости карточки.
+    
+    Args:
+        trickiness_level: Числовой уровень подлости (0-3)
+    """
+    if trickiness_level == 0:
+        return "Нет", "gray"
+    elif trickiness_level == 1:
+        return "Низкий", "yellow"
+    elif trickiness_level == 2:
+        return "Средний", "orange"
+    elif trickiness_level == 3:
+        return "Высокий", "red"
+    else:
+        return "Неизвестно", "gray"
+
+# Добавление в display_metrics_row информации о подлости
+def update_card_metrics_display(selected_card):
+    """
+    Обновляет отображение метрик карточки, включая подлость.
+    
+    Args:
+        selected_card: Данные о выбранной карточке
+    """
+    # Определяем уровень подлости
+    trickiness_level = selected_card.get("trickiness_level", 0)
+    trickiness_text, trickiness_color = display_trickiness_info(trickiness_level)
+    
+    # Создаем словарь с данными карточки, включая подлость
+    card_data = {
+        "ID карточки": selected_card["card_id"],
+        "Тип карточки": selected_card["card_type"] if "card_type" in selected_card else "Не указан",
+        "Дискриминативность": f"{selected_card['discrimination_avg']:.3f}",
+        "Успешность": f"{selected_card['success_rate']:.1%}",
+        "Успешность с первой попытки": f"{selected_card['first_try_success_rate']:.1%}",
+        "Уровень подлости": f"{trickiness_text}",  # Добавляем информацию о подлости
+        "Количество жалоб": f"{selected_card['complaints_total'] if 'complaints_total' in selected_card else 0}",
+        "Доля жалоб": f"{selected_card['complaint_rate']:.1%}",
+        "Доля пытавшихся": f"{selected_card['attempted_share']:.1%}",
+        "Количество попыток": f"{selected_card['total_attempts']:.0f}",
+        "Текущий риск": f"{selected_card['risk']:.3f}"
+    }
+    
+    # Отображаем данные с выделением уровня подлости
+    for key, value in card_data.items():
+        if key == "Уровень подлости":
+            st.markdown(f"**{key}:** <span style='color:{trickiness_color};font-weight:bold;'>{value}</span>", unsafe_allow_html=True)
+        else:
+            st.markdown(f"**{key}:** {value}")
+    
+    # Показываем ссылку на карточку, если есть
+    if "card_url" in selected_card and pd.notna(selected_card["card_url"]):
+        st.markdown(f"[Открыть карточку в редакторе]({selected_card['card_url']})")
+
+# Модификация функции для отображения компонентов риска
+def update_risk_components_display(card_dict):
+    """
+    Обновляет отображение компонентов риска для карточки, включая подлость вместо first_try.
+    
+    Args:
+        card_dict: Словарь с данными карточки
+    """
+    # Получаем параметры из конфигурации
+    config = core.get_config()
+    
+    # Рассчитываем риски отдельных метрик
+    risk_discr = core.discrimination_risk_score(card_dict["discrimination_avg"])
+    risk_success = core.success_rate_risk_score(card_dict["success_rate"])
+    risk_trickiness = core.trickiness_risk_score(card_dict)  # Новая метрика подлости
+    risk_complaints = core.complaint_risk_score(card_dict)
+    risk_attempted = core.attempted_share_risk_score(card_dict["attempted_share"])
+    
+    # Определяем максимальный риск
+    max_risk = max(risk_discr, risk_success, risk_trickiness, risk_complaints, risk_attempted)
+    
+    # Получаем веса из конфигурации
+    WEIGHT_DISCRIMINATION = config["weights"]["discrimination"]
+    WEIGHT_SUCCESS_RATE = config["weights"]["success_rate"]
+    WEIGHT_TRICKINESS = config["weights"].get("trickiness", 0.15)
+    WEIGHT_COMPLAINT_RATE = config["weights"]["complaint_rate"]
+    WEIGHT_ATTEMPTED = config["weights"]["attempted"]
+    
+    # Рассчитываем взвешенное среднее
+    weighted_avg_risk = (
+        WEIGHT_DISCRIMINATION * risk_discr +
+        WEIGHT_SUCCESS_RATE * risk_success +
+        WEIGHT_TRICKINESS * risk_trickiness +
+        WEIGHT_COMPLAINT_RATE * risk_complaints +
+        WEIGHT_ATTEMPTED * risk_attempted
+    )
+    
+    # Отображаем результаты расчета
+    st.markdown(f"#### Риск по метрикам:")
+    
+    # Определение категорий риска и цветов
+    def risk_category(risk):
+        if risk > 0.75:
+            return "Критический", "red"
+        elif risk > 0.5:
+            return "Высокий", "orange"
+        elif risk > 0.25:
+            return "Умеренный", "gold"
+        else:
+            return "Низкий", "green"
+    
+    # Словарь с рисками для отображения
+    risks = {
+        "Дискриминативность": risk_discr,
+        "Успешность": risk_success,
+        "Подлость": risk_trickiness,  # Новая метрика вместо first_try
+        "Количество жалоб": risk_complaints,
+        "Доля пытавшихся": risk_attempted
+    }
+    
+    # Отображаем риски по метрикам
+    for metric, risk in risks.items():
+        category, color = risk_category(risk)
+        st.markdown(f"**{metric}**: {risk:.3f} - <span style='color:{color};'>{category}</span>", unsafe_allow_html=True)
+    
+    # Возвращаем компоненты риска для дальнейшего использования
+    return {
+        "risks": risks,
+        "weighted_avg": weighted_avg_risk,
+        "max_risk": max_risk,
+        "weights": {
+            "discrimination": WEIGHT_DISCRIMINATION,
+            "success_rate": WEIGHT_SUCCESS_RATE,
+            "trickiness": WEIGHT_TRICKINESS,
+            "complaint_rate": WEIGHT_COMPLAINT_RATE,
+            "attempted": WEIGHT_ATTEMPTED
+        }
+    }
 
 # Обновлённая версия функции для страницы с карточками
 def page_cards(df: pd.DataFrame, eng):

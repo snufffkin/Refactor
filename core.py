@@ -220,13 +220,94 @@ def attempted_share_risk_score(attempted_share):
         normalized = max(0, attempted_share / ATTEMPTS_INSUFFICIENT_LOW)
         return 1.0 - normalized * 0.49  # 0.51-1.0
 
+# Добавляем функцию для определения "подлости" карточки
+def get_trickiness_level(row):
+    """
+    Определяет уровень "подлости" карточки на основе успешности и успешности с первой попытки.
+    
+    Args:
+        row: Строка DataFrame с данными карточки
+        
+    Returns:
+        int: Уровень "подлости" (0 - нет, 1 - низкий, 2 - средний, 3 - высокий)
+    """
+    # Получаем параметры трики-карточек из конфигурации
+    config = get_config()
+    tricky_config = config.get("tricky_cards", {})
+    
+    # Получаем базовые параметры
+    basic_config = tricky_config.get("basic", {})
+    min_success_rate = basic_config.get("min_success_rate", 0.70)
+    max_first_try_rate = basic_config.get("max_first_try_rate", 0.60)
+    min_difference = basic_config.get("min_difference", 0.20)
+    
+    # Получаем параметры зон
+    zones_config = tricky_config.get("zones", {})
+    high_success_threshold = zones_config.get("high_success_threshold", 0.90)
+    medium_success_threshold = zones_config.get("medium_success_threshold", 0.80)
+    low_first_try_threshold = zones_config.get("low_first_try_threshold", 0.40)
+    medium_first_try_threshold = zones_config.get("medium_first_try_threshold", 0.50)
+    
+    # Считаем разницу между общей успешностью и успехом с первой попытки
+    success_diff = row["success_rate"] - row["first_try_success_rate"]
+    
+    # Проверяем базовые критерии трики-карточки
+    is_tricky = (
+        (row["success_rate"] >= min_success_rate) and 
+        (row["first_try_success_rate"] <= max_first_try_rate) and
+        (success_diff >= min_difference)
+    )
+    
+    # Если не является трики-карточкой, возвращаем 0
+    if not is_tricky:
+        return 0
+    
+    # Высокий уровень подлости (3)
+    if (row["success_rate"] >= high_success_threshold and 
+        row["first_try_success_rate"] <= low_first_try_threshold):
+        return 3
+    
+    # Средний уровень подлости (2)
+    if (row["success_rate"] >= medium_success_threshold and
+        row["first_try_success_rate"] <= medium_first_try_threshold):
+        return 2
+    
+    # Низкий уровень подлости (1)
+    return 1
+
+def trickiness_risk_score(row):
+    """
+    Рассчитывает риск (0-1) на основе уровня "подлости" карточки.
+    
+    Args:
+        row: Строка DataFrame с данными карточки
+        
+    Returns:
+        float: Значение риска от 0 до 1
+    """
+    # Определяем уровень подлости
+    trickiness_level = get_trickiness_level(row)
+    
+    # В зависимости от уровня подлости назначаем риск
+    if trickiness_level == 0:
+        return 0.0  # Нет риска, если карточка не является "трики"
+    elif trickiness_level == 1:
+        return 0.3  # Низкий уровень риска для низкой подлости
+    elif trickiness_level == 2:
+        return 0.6  # Средний уровень риска для средней подлости
+    elif trickiness_level == 3:
+        return 0.9  # Высокий уровень риска для высокой подлости
+    
+    return 0.0  # На всякий случай
+
+# Обновленная функция расчета риска
 def risk_score(row):
     """
     Расчет показателя риска для карточки на основе интервального подхода.
     
     Формула учитывает:
     - Успешность прохождения (success_rate)
-    - Успешность с первой попытки (first_try_success_rate)
+    - Уровень "подлости" карточки (trickiness) - вместо first_try_success_rate
     - Количество жалоб (complaints_total) - абсолютное значение
     - Индекс дискриминативности (discrimination_avg)
     - Долю студентов, которые попытались решить (attempted_share)
@@ -240,7 +321,7 @@ def risk_score(row):
     config = get_config()
     WEIGHT_DISCRIMINATION = config["weights"]["discrimination"]
     WEIGHT_SUCCESS_RATE = config["weights"]["success_rate"]
-    WEIGHT_FIRST_TRY = config["weights"]["first_try"]
+    WEIGHT_TRICKINESS = config["weights"].get("trickiness", 0.15)  # Используем тот же вес, что был у first_try
     WEIGHT_COMPLAINT_RATE = config["weights"]["complaint_rate"]
     WEIGHT_ATTEMPTED = config["weights"]["attempted"]
     
@@ -259,18 +340,18 @@ def risk_score(row):
     # Рассчитываем риск для каждой метрики (0-1)
     risk_discr = discrimination_risk_score(row.discrimination_avg)
     risk_success = success_rate_risk_score(row.success_rate)
-    risk_first_try = first_try_risk_score(row.first_try_success_rate)
+    risk_trickiness = trickiness_risk_score(row)  # Новая метрика вместо first_try
     risk_complaints = complaint_risk_score(row)  # Передаем всю строку для доступа к complaints_total
     risk_attempted = attempted_share_risk_score(row.attempted_share)
     
     # Определяем максимальный риск
-    max_risk = max(risk_discr, risk_success, risk_first_try, risk_complaints, risk_attempted)
+    max_risk = max(risk_discr, risk_success, risk_trickiness, risk_complaints, risk_attempted)
     
     # Рассчитываем взвешенное среднее
     weighted_avg_risk = (
         WEIGHT_DISCRIMINATION * risk_discr +
         WEIGHT_SUCCESS_RATE * risk_success +
-        WEIGHT_FIRST_TRY * risk_first_try +
+        WEIGHT_TRICKINESS * risk_trickiness +  # Используем риск подлости вместо first_try
         WEIGHT_COMPLAINT_RATE * risk_complaints +
         WEIGHT_ATTEMPTED * risk_attempted
     )
@@ -292,7 +373,6 @@ def risk_score(row):
     adjusted_risk = raw_risk * confidence_factor + NEUTRAL_RISK_VALUE * (1 - confidence_factor)
     
     return adjusted_risk
-
 
 def apply_filters(df: pd.DataFrame, upto: Optional[List[str]] = None) -> pd.DataFrame:
     cols = FILTERS if upto is None else upto
@@ -358,6 +438,7 @@ def clickable(label: str, level: str) -> None:
 
 # ---------------- Risk Analysis -------------------------------------------- #
 
+# Обновляем функцию для получения компонентов риска
 def get_risk_components(df: pd.DataFrame) -> pd.DataFrame:
     """
     Рассчитывает компоненты риска для каждой карточки и возвращает их в виде DataFrame.
@@ -366,23 +447,34 @@ def get_risk_components(df: pd.DataFrame) -> pd.DataFrame:
     # Копируем данные для расчетов
     df_risk = df.copy()
     
+    # Определяем уровень подлости для каждой карточки
+    df_risk['trickiness_level'] = df_risk.apply(get_trickiness_level, axis=1)
+    
     # Рассчитываем компоненты риска
     df_risk['risk_success'] = 1 - df_risk.success_rate
-    df_risk['risk_first_try'] = 1 - df_risk.first_try_success_rate
+    df_risk['risk_trickiness'] = df_risk.apply(trickiness_risk_score, axis=1)  # Новая метрика
     df_risk['risk_complaints'] = np.minimum(df_risk.complaint_rate * 3, 1)
     df_risk['risk_discrimination'] = 1 - df_risk.discrimination_avg
     df_risk['risk_attempted'] = 1 - df_risk.attempted_share
     
+    # Получаем параметры из конфигурации
+    config = get_config()
+    WEIGHT_DISCRIMINATION = config["weights"]["discrimination"]
+    WEIGHT_SUCCESS_RATE = config["weights"]["success_rate"]
+    WEIGHT_TRICKINESS = config["weights"].get("trickiness", 0.15)  # Используем тот же вес, что был у first_try
+    WEIGHT_COMPLAINT_RATE = config["weights"]["complaint_rate"]
+    WEIGHT_ATTEMPTED = config["weights"]["attempted"]
+    
     # Добавляем информацию о весах компонентов
-    df_risk['weight_success'] = 0.25
-    df_risk['weight_first_try'] = 0.15
-    df_risk['weight_complaints'] = 0.30
-    df_risk['weight_discrimination'] = 0.20
-    df_risk['weight_attempted'] = 0.10
+    df_risk['weight_success'] = WEIGHT_SUCCESS_RATE
+    df_risk['weight_trickiness'] = WEIGHT_TRICKINESS  # Новая метрика
+    df_risk['weight_complaints'] = WEIGHT_COMPLAINT_RATE
+    df_risk['weight_discrimination'] = WEIGHT_DISCRIMINATION
+    df_risk['weight_attempted'] = WEIGHT_ATTEMPTED
     
     # Рассчитываем вклады в итоговый риск
     df_risk['contrib_success'] = df_risk.risk_success * df_risk.weight_success
-    df_risk['contrib_first_try'] = df_risk.risk_first_try * df_risk.weight_first_try
+    df_risk['contrib_trickiness'] = df_risk.risk_trickiness * df_risk.weight_trickiness  # Новая метрика
     df_risk['contrib_complaints'] = df_risk.risk_complaints * df_risk.weight_complaints
     df_risk['contrib_discrimination'] = df_risk.risk_discrimination * df_risk.weight_discrimination
     df_risk['contrib_attempted'] = df_risk.risk_attempted * df_risk.weight_attempted
@@ -390,7 +482,7 @@ def get_risk_components(df: pd.DataFrame) -> pd.DataFrame:
     # Рассчитываем сырой риск без учета количества попыток
     df_risk['raw_risk'] = (
         df_risk.contrib_success +
-        df_risk.contrib_first_try +
+        df_risk.contrib_trickiness +  # Новая метрика
         df_risk.contrib_complaints +
         df_risk.contrib_discrimination +
         df_risk.contrib_attempted

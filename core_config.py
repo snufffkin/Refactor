@@ -22,11 +22,7 @@ DEFAULT_CONFIG = {
         "optimal_low": 0.75,
         "suboptimal_low": 0.50
     },
-    "first_try": {
-        "too_easy": 0.90,
-        "optimal_low": 0.65,
-        "multiple_low": 0.40
-    },
+    # Убираем секцию first_try, так как теперь используем trickiness
     "complaints": {
         "critical": 50,
         "high": 10,
@@ -41,7 +37,7 @@ DEFAULT_CONFIG = {
         "complaint_rate": 0.35,
         "success_rate": 0.25,
         "discrimination": 0.20,
-        "first_try": 0.15,
+        "trickiness": 0.15,  # Заменяем first_try на trickiness с тем же весом
         "attempted": 0.05
     },
     "risk_thresholds": {
@@ -50,13 +46,13 @@ DEFAULT_CONFIG = {
         "min_for_critical": 0.60,
         "min_for_high": 0.40,
         "alpha_weight_avg": 0.7,
-        "use_min_threshold": False  # Новый параметр для включения/отключения минимального порога
+        "use_min_threshold": False  # Параметр для включения/отключения минимального порога
     },
     "stats": {
         "significance_threshold": 100,
         "neutral_risk_value": 0.50
     },
-    # Новая секция с параметрами трики-карточек
+    # Секция с параметрами трики-карточек
     "tricky_cards": {
         "basic": {
             "min_success_rate": 0.70,
@@ -153,9 +149,14 @@ def get_config():
             with open(CONFIG_PATH, 'r', encoding='utf-8') as file:
                 config = json.load(file)
                 
-                # Добавляем новый параметр, если его нет
+                # Проверяем наличие новых параметров и добавляем их при необходимости
                 if "risk_thresholds" in config and "use_min_threshold" not in config["risk_thresholds"]:
                     config["risk_thresholds"]["use_min_threshold"] = True
+                
+                # Обновляем веса - заменяем first_try на trickiness
+                if "weights" in config:
+                    if "first_try" in config["weights"] and "trickiness" not in config["weights"]:
+                        config["weights"]["trickiness"] = config["weights"].pop("first_try")
                 
                 _cached_config = config
                 _config_last_modified = current_mtime

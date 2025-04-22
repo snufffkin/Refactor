@@ -10,6 +10,205 @@ import plotly.express as px
 
 # Исправление в components/metrics.py или в соответствующей функции
 
+def display_trickiness_distribution(df, group_by_col=None):
+    """
+    Отображает распределение уровней подлости карточек.
+    
+    Args:
+        df: DataFrame с данными
+        group_by_col: Колонка для группировки (если None, используются все данные)
+    """
+    # Проверяем наличие колонки trickiness_level
+    if "trickiness_level" not in df.columns:
+        df["trickiness_level"] = df.apply(core.get_trickiness_level, axis=1)
+    
+    # Определяем категории подлости
+    trickiness_categories = {
+        0: "Нет подлости",
+        1: "Низкий уровень подлости",
+        2: "Средний уровень подлости",
+        3: "Высокий уровень подлости"
+    }
+    
+    # Добавляем колонку с текстовыми категориями
+    df["trickiness_category"] = df["trickiness_level"].map(trickiness_categories)
+    
+    if group_by_col is not None:
+        # Группируем данные по указанной колонке
+        trickiness_distribution = []
+        
+        for _, group in df.groupby(group_by_col):
+            trickiness_counts = group["trickiness_level"].value_counts().sort_index()
+            name = group[group_by_col].iloc[0]
+            
+            for level, count in trickiness_counts.items():
+                trickiness_distribution.append({
+                    "name": name,
+                    "level": level,
+                    "category": trickiness_categories.get(level, "Неизвестно"),
+                    "count": count
+                })
+        
+        trickiness_df = pd.DataFrame(trickiness_distribution)
+        
+        # Группируем по категории и считаем общее количество
+        overall_distribution = trickiness_df.groupby("category")["count"].sum().reset_index()
+        overall_distribution.columns = ["Категория подлости", "Количество"]
+        
+        # Устанавливаем правильный порядок категорий
+        category_order = list(trickiness_categories.values())
+        overall_distribution["Категория подлости"] = pd.Categorical(
+            overall_distribution["Категория подлости"], 
+            categories=category_order, 
+            ordered=True
+        )
+        overall_distribution = overall_distribution.sort_values("Категория подлости")
+    else:
+        # Используем все данные напрямую
+        trickiness_counts = df["trickiness_level"].value_counts().sort_index()
+        
+        overall_distribution = pd.DataFrame({
+            "Категория подлости": [trickiness_categories.get(level, "Неизвестно") for level in trickiness_counts.index],
+            "Количество": trickiness_counts.values
+        })
+        
+        # Устанавливаем правильный порядок категорий
+        category_order = list(trickiness_categories.values())
+        overall_distribution["Категория подлости"] = pd.Categorical(
+            overall_distribution["Категория подлости"], 
+            categories=category_order, 
+            ordered=True
+        )
+        overall_distribution = overall_distribution.sort_values("Категория подлости")
+    
+    # Цветовая схема для уровней подлости
+    color_map = {
+        "Нет подлости": "#c0c0c0",  # серый
+        "Низкий уровень подлости": "#ffff7f",  # желтый
+        "Средний уровень подлости": "#ffaa7f",  # оранжевый
+        "Высокий уровень подлости": "#ff7f7f"   # красный
+    }
+    
+    # Создаем диаграмму
+    fig = px.bar(
+        overall_distribution,
+        x="Категория подлости",
+        y="Количество",
+        color="Категория подлости",
+        color_discrete_map=color_map,
+        title="Распределение по уровням подлости"
+    )
+    
+    # Форматируем подсказки
+    fig.update_traces(
+        hovertemplate="<b>%{x}</b><br>" +
+                      "Количество: %{y}"
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    return overall_distribution
+
+def update_display_metrics_row(df, group_by_col=None, compare_with=None):
+    """
+    Дополняет функцию display_metrics_row для отображения метрики подлости
+    
+    Args:
+        df: DataFrame с данными
+        group_by_col: Колонка для группировки (если None, используются все данные)
+        compare_with: DataFrame для сравнения (если указан, показывает дельту)
+    """
+    # Проверяем наличие колонки trickiness_level
+    if "trickiness_level" not in df.columns:
+        df["trickiness_level"] = df.apply(core.get_trickiness_level, axis=1)
+    
+    # Вычисляем средний уровень подлости
+    if group_by_col is not None:
+        # Агрегируем данные по указанной колонке
+        df_agg = df.groupby(group_by_col).agg(
+            trickiness_avg=("trickiness_level", "mean")
+        ).reset_index()
+        
+        # Вычисляем средний уровень подлости
+        avg_trickiness = df_agg["trickiness_avg"].mean()
+    else:
+        # Используем все данные
+        avg_trickiness = df["trickiness_level"].mean()
+    
+    # Если есть данные для сравнения, вычисляем дельту
+    if compare_with is not None and "trickiness_level" in compare_with.columns:
+        trickiness_delta = avg_trickiness - compare_with["trickiness_level"].mean()
+    else:
+        trickiness_delta = None
+    
+    # Возвращаем результаты для дополнения отображения метрик
+    return {
+        "avg_trickiness": avg_trickiness,
+        "trickiness_delta": trickiness_delta
+    }
+
+# Добавляем функцию для отображения метрики подлости
+def display_trickiness_metric(avg_trickiness, trickiness_delta=None):
+    """
+    Отображает метрику среднего уровня подлости
+    
+    Args:
+        avg_trickiness: Средний уровень подлости
+        trickiness_delta: Дельта относительно другого набора данных (опционально)
+    """
+    # Определяем цвет метрики в зависимости от уровня подлости
+    trickiness_color = "#4da6ff"  # Стандартный цвет метрики
+    
+    # Отображаем метрику подлости
+    st.metric(
+        "Средний уровень подлости", 
+        f"{avg_trickiness:.2f}", 
+        f"{trickiness_delta:.2f}" if trickiness_delta is not None else None, 
+        delta_color="inverse"  # Инвертируем цвет дельты (т.к. увеличение подлости - негативно)
+    )
+    
+    # Дополнительная информация об интерпретации уровня подлости
+    trickiness_info = ""
+    if avg_trickiness < 0.5:
+        trickiness_info = "Низкий уровень подлости"
+    elif avg_trickiness < 1.5:
+        trickiness_info = "В основном низкий уровень"
+    elif avg_trickiness < 2.0:
+        trickiness_info = "Средний уровень подлости"
+    elif avg_trickiness < 2.5:
+        trickiness_info = "Преимущественно средний уровень"
+    else:
+        trickiness_info = "Высокий уровень подлости"
+    
+    # Возвращаем информацию для дополнительного отображения
+    return trickiness_info
+
+# Функция для расчета распределения карточек по уровням подлости
+def get_trickiness_distribution(df):
+    """
+    Рассчитывает распределение карточек по уровням подлости
+    
+    Args:
+        df: DataFrame с данными
+        
+    Returns:
+        dict: Словарь с количеством карточек по уровням подлости
+    """
+    # Проверяем наличие колонки trickiness_level
+    if "trickiness_level" not in df.columns:
+        df["trickiness_level"] = df.apply(core.get_trickiness_level, axis=1)
+    
+    # Считаем количество карточек по уровням подлости
+    trickiness_distribution = df["trickiness_level"].value_counts().to_dict()
+    
+    # Обеспечиваем наличие всех ключей
+    for level in range(4):  # 0, 1, 2, 3
+        if level not in trickiness_distribution:
+            trickiness_distribution[level] = 0
+    
+    # Возвращаем распределение
+    return trickiness_distribution
+
 def display_metrics_row(df, group_by_col=None, compare_with=None):
     """
     Отображает ряд ключевых метрик для DataFrame
