@@ -250,6 +250,9 @@ def risk_score(row):
     MIN_RISK_FOR_HIGH = config["risk_thresholds"]["min_for_high"]
     ALPHA_WEIGHT_AVG = config["risk_thresholds"]["alpha_weight_avg"]
     
+    # Получаем параметр, отвечающий за использование минимального порога
+    USE_MIN_THRESHOLD = config["risk_thresholds"].get("use_min_threshold", True)
+    
     STATS_SIGNIFICANCE_THRESHOLD = config["stats"]["significance_threshold"]
     NEUTRAL_RISK_VALUE = config["stats"]["neutral_risk_value"]
     
@@ -273,12 +276,12 @@ def risk_score(row):
     )
     
     # Определяем минимальный порог риска на основе максимального риска
-    if max_risk > RISK_CRITICAL_THRESHOLD:
-        min_threshold = MIN_RISK_FOR_CRITICAL
-    elif max_risk > RISK_HIGH_THRESHOLD:
-        min_threshold = MIN_RISK_FOR_HIGH
-    else:
-        min_threshold = 0
+    min_threshold = 0
+    if USE_MIN_THRESHOLD:  # Проверяем, нужно ли использовать минимальный порог
+        if max_risk > RISK_CRITICAL_THRESHOLD:
+            min_threshold = MIN_RISK_FOR_CRITICAL
+        elif max_risk > RISK_HIGH_THRESHOLD:
+            min_threshold = MIN_RISK_FOR_HIGH
     
     # Применяем комбинированную формулу
     combined_risk = ALPHA_WEIGHT_AVG * weighted_avg_risk + (1 - ALPHA_WEIGHT_AVG) * max_risk

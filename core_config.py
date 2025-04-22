@@ -49,7 +49,8 @@ DEFAULT_CONFIG = {
         "high": 0.50,
         "min_for_critical": 0.60,
         "min_for_high": 0.40,
-        "alpha_weight_avg": 0.7
+        "alpha_weight_avg": 0.7,
+        "use_min_threshold": True  # Новый параметр для включения/отключения минимального порога
     },
     "stats": {
         "significance_threshold": 100,
@@ -83,6 +84,11 @@ def get_config():
             # Иначе загружаем конфигурацию из файла
             with open(CONFIG_PATH, 'r', encoding='utf-8') as file:
                 config = json.load(file)
+                
+                # Добавляем новый параметр, если его нет
+                if "risk_thresholds" in config and "use_min_threshold" not in config["risk_thresholds"]:
+                    config["risk_thresholds"]["use_min_threshold"] = True
+                
                 _cached_config = config
                 _config_last_modified = current_mtime
                 return config
