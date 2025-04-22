@@ -55,6 +55,20 @@ DEFAULT_CONFIG = {
     "stats": {
         "significance_threshold": 100,
         "neutral_risk_value": 0.50
+    },
+    # Новая секция с параметрами трики-карточек
+    "tricky_cards": {
+        "basic": {
+            "min_success_rate": 0.70,
+            "max_first_try_rate": 0.60,
+            "min_difference": 0.20,
+        },
+        "zones": {
+            "high_success_threshold": 0.90,
+            "medium_success_threshold": 0.80,
+            "low_first_try_threshold": 0.40,
+            "medium_first_try_threshold": 0.50
+        }
     }
 }
 
@@ -62,6 +76,60 @@ DEFAULT_CONFIG = {
 _cached_config = None
 _config_last_modified = 0
 
+def get_tricky_config():
+    """
+    Получает параметры трики-карточек из общего конфигурационного файла
+    
+    Returns:
+        dict: Параметры трики-карточек или значения по умолчанию
+    """
+    config = get_config()  # Используем существующую функцию для получения конфигурации
+    
+    # Проверяем наличие секции трики-карточек
+    if "tricky_cards" in config:
+        return config["tricky_cards"]
+    else:
+        # Возвращаем значения по умолчанию, если секция отсутствует
+        default_tricky_config = {
+            "basic": {
+                "min_success_rate": 0.70,
+                "max_first_try_rate": 0.60,
+                "min_difference": 0.20,
+            },
+            "zones": {
+                "high_success_threshold": 0.90,
+                "medium_success_threshold": 0.80,
+                "low_first_try_threshold": 0.40,
+                "medium_first_try_threshold": 0.50
+            }
+        }
+        return default_tricky_config
+
+def save_tricky_config(tricky_config):
+    """
+    Сохраняет параметры трики-карточек в общий конфигурационный файл
+    
+    Args:
+        tricky_config (dict): Параметры трики-карточек для сохранения
+        
+    Returns:
+        bool: True, если сохранение успешно, иначе False
+    """
+    try:
+        # Получаем текущую конфигурацию
+        config = get_config()
+        
+        # Обновляем или добавляем секцию трики-карточек
+        config["tricky_cards"] = tricky_config
+        
+        # Сохраняем обновленную конфигурацию
+        result = save_config(config)
+        
+        return result
+    except Exception as e:
+        logging.error(f"Ошибка при сохранении конфигурации трики-карточек: {str(e)}")
+        return False
+    
 def get_config():
     """
     Загружает конфигурацию из файла или возвращает кэшированную версию,

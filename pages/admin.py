@@ -12,7 +12,44 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 import core
-from core_config import get_config, save_config
+from core_config import get_tricky_config, save_tricky_config, get_config, save_config
+
+# Вспомогательная функция для отображения таблицы с трики-карточками
+def display_tricky_cards_table(tricky_df):
+    # Показываем только основные колонки
+    display_columns = [
+        "card_id", "card_type", "program", "module", "lesson", 
+        "success_rate", "first_try_success_rate", "success_diff", "complaint_rate"
+    ]
+    
+    # Проверяем наличие URL-колонки
+    if "card_url" in tricky_df.columns:
+        # Создаем DataFrame для отображения с кликабельными ссылками
+        display_df = pd.DataFrame()
+        display_df["ID карточки"] = tricky_df.apply(
+            lambda row: f"[{int(row['card_id'])}]({row['card_url']})" if pd.notna(row['card_url']) else str(int(row['card_id'])),
+            axis=1
+        )
+        display_df["Тип"] = tricky_df["card_type"]
+        display_df["Общая успешность"] = tricky_df["success_rate"].apply(lambda x: f"{x:.1%}")
+        display_df["Успех с 1-й попытки"] = tricky_df["first_try_success_rate"].apply(lambda x: f"{x:.1%}")
+        display_df["Разница"] = tricky_df["success_diff"].apply(lambda x: f"{x:.1%}")
+        display_df["Жалобы"] = tricky_df["complaint_rate"].apply(lambda x: f"{x:.1%}")
+        display_df["Программа"] = tricky_df["program"]
+        
+        # Отображаем с кликабельными ссылками
+        st.dataframe(display_df, hide_index=True, use_container_width=True)
+    else:
+        # Отображаем обычную таблицу
+        st.dataframe(
+            tricky_df[display_columns].style.format({
+                "success_rate": "{:.1%}",
+                "first_try_success_rate": "{:.1%}",
+                "success_diff": "{:.1%}",
+                "complaint_rate": "{:.1%}"
+            }),
+            use_container_width=True
+        )
 
 def page_admin(df: pd.DataFrame):
     """Страница администрирования конфигурации расчета риска"""
@@ -1017,7 +1054,110 @@ def page_admin(df: pd.DataFrame):
     # Вкладка анализа "трики"-карточек
     with tabs[4]:  # Индекс 4 соответствует добавленной вкладке
         st.subheader("Анализ \"трики\"-карточек")
+        # Загружаем настройки трики-карточек из конфигурации
+        tricky_config = get_tricky_config()
         
+        # Функция для сохранения текущих настроек
+        def save_current_tricky_settings():
+            config = {
+                "basic": {
+                    "min_success_rate": min_success_rate,
+                    "max_first_try_rate": max_first_try_rate,
+                    "min_difference": min_difference,
+                },
+                "zones": {
+                    "high_success_threshold": high_success_threshold,
+                    "medium_success_threshold": medium_success_threshold,
+                    "low_first_try_threshold": low_first_try_threshold,
+                    "medium_first_try_threshold": medium_first_try_threshold
+                }
+            }
+            
+            if save_tricky_config(config):
+                st.sidebar.success("Настройки трики-карточек сохранены в конфигурацию")
+            else:
+                st.sidebar.error("Ошибка при сохранении настроек трики-карточек")
+        
+
+        # Настройка параметров для определения "трики"-карточек
+        st.sidebar.markdown("### Параметры \"трики\"-карточек")
+        
+        min_success_rate = st.sidebar.slider(
+            "Минимальная общая успешность",
+            min_value=0.50,
+            max_value=1.0,
+            value=tricky_config["basic"].get("min_success_rate", 0.70),
+            step=0.05,
+            format="%.2f",
+            help="Минимальный процент общей успешности для отнесения к трики-карточкам"
+        )
+        
+        max_first_try_rate = st.sidebar.slider(
+            "Максимальная успешность с 1-й попытки",
+            min_value=0.0,
+            max_value=0.75,
+            value=tricky_config["basic"].get("max_first_try_rate", 0.60),
+            step=0.05,
+            format="%.2f",
+            help="Максимальный процент успеха с первой попытки для отнесения к трики-карточкам"
+        )
+        
+        min_difference = st.sidebar.slider(
+            "Минимальная разница успешности",
+            min_value=0.05,
+            max_value=0.50,
+            value=tricky_config["basic"].get("min_difference", 0.20),
+            step=0.05,
+            format="%.2f",
+            help="Минимальная разница между общей успешностью и успехом с первой попытки"
+        )
+        
+        # Добавляем параметры для интервальных зон "подлости"
+        st.sidebar.markdown("### Параметры зон \"подлости\"")
+        
+        high_success_threshold = st.sidebar.slider(
+            "Порог высокой успешности",
+            min_value=0.70,
+            max_value=1.0,
+            value=tricky_config["zones"].get("high_success_threshold", 0.90),
+            step=0.05,
+            format="%.2f",
+            help="Порог общей успешности для высокого уровня 'подлости'"
+        )
+        
+        medium_success_threshold = st.sidebar.slider(
+            "Порог средней успешности",
+            min_value=min_success_rate,
+            max_value=high_success_threshold - 0.05,
+            value=min(tricky_config["zones"].get("medium_success_threshold", 0.80), high_success_threshold - 0.05),
+            step=0.05,
+            format="%.2f",
+            help="Порог общей успешности для среднего уровня 'подлости'"
+        )
+        
+        low_first_try_threshold = st.sidebar.slider(
+            "Порог низкой успешности с 1-й попытки",
+            min_value=0.0,
+            max_value=max_first_try_rate,
+            value=min(tricky_config["zones"].get("low_first_try_threshold", 0.40), max_first_try_rate),
+            step=0.05,
+            format="%.2f",
+            help="Порог успешности с первой попытки для высокого уровня 'подлости'"
+        )
+        
+        medium_first_try_threshold = st.sidebar.slider(
+            "Порог средней успешности с 1-й попытки",
+            min_value=low_first_try_threshold + 0.05,
+            max_value=max_first_try_rate,
+            value=min(tricky_config["zones"].get("medium_first_try_threshold", 0.50), max_first_try_rate),
+            step=0.05,
+            format="%.2f",
+            help="Порог успешности с первой попытки для среднего уровня 'подлости'"
+        )
+        
+        # Добавляем кнопку для сохранения настроек
+        if st.sidebar.button("💾 Сохранить настройки трики-карточек", type="primary"):
+            save_current_tricky_settings()
         st.markdown("""
         ## Что такое "трики"-карточки?
         
@@ -1063,8 +1203,51 @@ def page_admin(df: pd.DataFrame):
             help="Минимальная разница между общей успешностью и успехом с первой попытки"
         )
         
+        # Добавляем параметры для интервальных зон "подлости"
+        st.sidebar.markdown("### Параметры зон \"подлости\"")
+        
+        high_success_threshold = st.sidebar.slider(
+            "Порог высокой успешности",
+            min_value=0.70,
+            max_value=1.0,
+            value=0.90,
+            step=0.05,
+            format="%.2f",
+            help="Порог общей успешности для высокого уровня 'подлости'"
+        )
+        
+        medium_success_threshold = st.sidebar.slider(
+            "Порог средней успешности",
+            min_value=min_success_rate,
+            max_value=high_success_threshold - 0.05,
+            value=min(min_success_rate + 0.15, high_success_threshold - 0.05),
+            step=0.05,
+            format="%.2f",
+            help="Порог общей успешности для среднего уровня 'подлости'"
+        )
+        
+        low_first_try_threshold = st.sidebar.slider(
+            "Порог низкой успешности с 1-й попытки",
+            min_value=0.0,
+            max_value=max_first_try_rate,
+            value=max(0.05, max_first_try_rate - 0.20),
+            step=0.05,
+            format="%.2f",
+            help="Порог успешности с первой попытки для высокого уровня 'подлости'"
+        )
+        
+        medium_first_try_threshold = st.sidebar.slider(
+            "Порог средней успешности с 1-й попытки",
+            min_value=low_first_try_threshold + 0.05,
+            max_value=max_first_try_rate,
+            value=min(low_first_try_threshold + 0.15, max_first_try_rate),
+            step=0.05,
+            format="%.2f",
+            help="Порог успешности с первой попытки для среднего уровня 'подлости'"
+        )
+        
         # Подготовка данных для анализа
-        # Используем только параметры успешности и первой попытки, без учета жалоб для упрощения
+        # Используем только параметры успешности и первой попытки
         
         # Копируем данные для обработки
         working_df = df.copy()
@@ -1079,20 +1262,86 @@ def page_admin(df: pd.DataFrame):
             (working_df["success_diff"] >= min_difference)
         )
         
+        # Определяем уровни "подлости" для трики-карточек
+        # Сначала определяем общие "трики"-карточки
+        working_df["is_tricky"] = (
+            (working_df["success_rate"] >= min_success_rate) & 
+            (working_df["first_try_success_rate"] <= max_first_try_rate) &
+            (working_df["success_diff"] >= min_difference)
+        )
+        
+        # Теперь определяем уровни "подлости" в соответствии с зонами на графике
+        # 1. Высокий уровень ("красная зона") - максимально хитрые задания
+        working_df["is_high_tricky"] = (
+            working_df["is_tricky"] &
+            (working_df["success_rate"] >= high_success_threshold) &
+            (working_df["first_try_success_rate"] <= low_first_try_threshold)
+        )
+        
+        # 2. Средний уровень ("оранжевая зона")
+        working_df["is_medium_tricky"] = (
+            working_df["is_tricky"] &
+            (
+                # Если карточка входит в оранжевую зону, но не в красную
+                ((working_df["success_rate"] >= medium_success_threshold) &
+                (working_df["first_try_success_rate"] <= medium_first_try_threshold)) &
+                ~working_df["is_high_tricky"]
+            )
+        )
+        
+        # 3. Низкий уровень ("желтая зона") - все остальные трики-карточки
+        working_df["is_low_tricky"] = (
+            working_df["is_tricky"] &
+            ~working_df["is_high_tricky"] &
+            ~working_df["is_medium_tricky"]
+        )
+        
         # Категория для легенды
-        working_df["category"] = working_df["is_tricky"].map({True: "Трики-карточки", False: "Обычные карточки"})
+        working_df["category"] = "Обычные карточки"
+        working_df.loc[working_df["is_low_tricky"], "category"] = "Трики-карточки (низкий уровень)"
+        working_df.loc[working_df["is_medium_tricky"], "category"] = "Трики-карточки (средний уровень)"
+        working_df.loc[working_df["is_high_tricky"], "category"] = "Трики-карточки (высокий уровень)"
         
         # Подсчет статистики
         total_cards = len(working_df)
-        tricky_cards = working_df["is_tricky"].sum()
-        tricky_percent = tricky_cards / total_cards if total_cards > 0 else 0
+        total_tricky = working_df["is_tricky"].sum()
+        low_tricky = working_df["is_low_tricky"].sum()
+        medium_tricky = working_df["is_medium_tricky"].sum()
+        high_tricky = working_df["is_high_tricky"].sum()
+        
+        tricky_percent = total_tricky / total_cards if total_cards > 0 else 0
+        low_percent = low_tricky / total_cards if total_cards > 0 else 0
+        medium_percent = medium_tricky / total_cards if total_cards > 0 else 0
+        high_percent = high_tricky / total_cards if total_cards > 0 else 0
         
         # Отображение статистики
-        st.markdown(f"### Статистика \"трики\"-карточек")
-        st.markdown(f"Найдено **{tricky_cards}** \"трики\"-карточек из **{total_cards}** карточек (**{tricky_percent:.1%}**)")
+        st.markdown("### Статистика \"трики\"-карточек")
+        
+        # Создаем колонки для статистики
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Всего \"трики\"-карточек", f"{total_tricky}", f"{tricky_percent:.1%} от всех")
+        
+        with col2:
+            st.metric("Низкий уровень (желтые)", f"{low_tricky}", f"{low_percent:.1%} от всех")
+        
+        with col3:
+            st.metric("Средний уровень (оранжевые)", f"{medium_tricky}", f"{medium_percent:.1%} от всех")
+        
+        with col4:
+            st.metric("Высокий уровень (красные)", f"{high_tricky}", f"{high_percent:.1%} от всех")
         
         # Создаем точечную диаграмму
         st.markdown(f"### Карта успешности карточек")
+        
+        # Создаем цветовую схему для категорий
+        color_map = {
+            "Обычные карточки": "blue",
+            "Трики-карточки (низкий уровень)": "yellow",
+            "Трики-карточки (средний уровень)": "orange",
+            "Трики-карточки (высокий уровень)": "red"
+        }
         
         fig = px.scatter(
             working_df,
@@ -1105,7 +1354,7 @@ def page_admin(df: pd.DataFrame):
                 "first_try_success_rate": "Успешность с первой попытки",
                 "category": "Категория карточек"
             },
-            color_discrete_map={"Трики-карточки": "red", "Обычные карточки": "blue"},
+            color_discrete_map=color_map,
             opacity=0.7,
             title="Распределение карточек по успешности и успешности с первой попытки"
         )
@@ -1137,21 +1386,87 @@ def page_admin(df: pd.DataFrame):
             )
         )
         
-        # Создаем зону "трики"-карточек
-        # Используем полупрозрачную заливку для обозначения зоны
+        # --- Создаем зоны "подлости" ---
+        
+        # 1. Желтая зона - низкий уровень "подлости" (внешняя)
+        # Вместо использования полигонов, вернемся к прямоугольникам, но сделаем их вложенными
         fig.add_shape(
             type="rect",
             x0=min_success_rate,
             y0=0,
             x1=1,
             y1=max_first_try_rate,
-            fillcolor="rgba(255,0,0,0.1)",
-            line=dict(color="red", width=1, dash="dash"),
+            fillcolor="rgba(255,255,0,0.2)",
+            line=dict(color="yellow", width=1, dash="dash"),
             layer="below",
-            name="Зона трики-карточек"
+            name="Зона низкой подлости"
         )
         
-        # Добавляем вертикальную линию минимальной успешности
+        # 2. Оранжевая зона - средний уровень "подлости" (средняя)
+        fig.add_shape(
+            type="rect",
+            x0=medium_success_threshold,
+            y0=0,
+            x1=1,
+            y1=medium_first_try_threshold,
+            fillcolor="rgba(255,165,0,0.3)",  # оранжевый цвет
+            line=dict(color="orange", width=1, dash="dash"),
+            layer="below",
+            name="Зона средней подлости"
+        )
+        
+        # 3. Красная зона - высокий уровень "подлости" (внутренняя)
+        fig.add_shape(
+            type="rect",
+            x0=high_success_threshold,
+            y0=0,
+            x1=1,
+            y1=low_first_try_threshold,
+            fillcolor="rgba(255,0,0,0.4)",  # красный цвет
+            line=dict(color="red", width=1, dash="dash"),
+            layer="below",
+            name="Зона высокой подлости"
+        )
+        
+        # Добавляем аннотации для зон "подлости"
+        fig.add_annotation(
+            x=(min_success_rate + 1) / 2,
+            y=max_first_try_rate / 2,
+            text="Низкий уровень 'подлости'",
+            showarrow=False,
+            font=dict(color="black", size=12),
+            bgcolor="rgba(255,255,0,0.7)",
+            bordercolor="yellow",
+            borderwidth=1,
+            borderpad=4
+        )
+        
+        fig.add_annotation(
+            x=(medium_success_threshold + 1) / 2,
+            y=medium_first_try_threshold / 2,
+            text="Средний уровень 'подлости'",
+            showarrow=False,
+            font=dict(color="black", size=12),
+            bgcolor="rgba(255,165,0,0.7)",
+            bordercolor="orange",
+            borderwidth=1,
+            borderpad=4
+        )
+        
+        fig.add_annotation(
+            x=(high_success_threshold + 1) / 2,
+            y=low_first_try_threshold / 2,
+            text="Высокий уровень 'подлости'",
+            showarrow=False,
+            font=dict(color="white", size=12),
+            bgcolor="rgba(255,0,0,0.7)",
+            bordercolor="red",
+            borderwidth=1,
+            borderpad=4
+        )
+        
+        # Добавляем вертикальные и горизонтальные линии для основных границ
+        # Вертикальная линия минимальной успешности
         fig.add_vline(
             x=min_success_rate, 
             line_dash="dash", 
@@ -1161,7 +1476,17 @@ def page_admin(df: pd.DataFrame):
             annotation_position="top"
         )
         
-        # Добавляем горизонтальную линию максимальной успешности с первой попытки
+        # Вертикальная линия для разделения средней и высокой успешности
+        fig.add_vline(
+            x=high_success_threshold, 
+            line_dash="dash", 
+            line_color="green", 
+            line_width=1,
+            annotation_text=f"Порог высокой успешности: {high_success_threshold:.2f}",
+            annotation_position="top"
+        )
+        
+        # Горизонтальная линия максимальной успешности с первой попытки
         fig.add_hline(
             y=max_first_try_rate, 
             line_dash="dash", 
@@ -1171,17 +1496,14 @@ def page_admin(df: pd.DataFrame):
             annotation_position="left"
         )
         
-        # Добавляем аннотацию для зоны "трики"-карточек
-        fig.add_annotation(
-            x=(min_success_rate + 1) / 2,
-            y=max_first_try_rate / 2,
-            text="Зона 'трики'-карточек",
-            showarrow=False,
-            font=dict(color="red", size=14),
-            bgcolor="rgba(255,255,255,0.7)",
-            bordercolor="red",
-            borderwidth=1,
-            borderpad=4
+        # Горизонтальная линия для порога низкой успешности с первой попытки
+        fig.add_hline(
+            y=low_first_try_threshold, 
+            line_dash="dash", 
+            line_color="red", 
+            line_width=1,
+            annotation_text=f"Порог низкой успешности с 1-й попытки: {low_first_try_threshold:.2f}",
+            annotation_position="left"
         )
         
         # Настройка макета
@@ -1208,47 +1530,97 @@ def page_admin(df: pd.DataFrame):
         
         st.plotly_chart(fig, use_container_width=True)
         
-        # Отображение таблицы с трики-карточками
-        if tricky_cards > 0:
-            st.markdown("### Список \"трики\"-карточек")
-            
-            # Фильтруем только трики-карточки
-            tricky_df = working_df[working_df["is_tricky"]].sort_values("success_diff", ascending=False)
-            
-            # Показываем только основные колонки
-            display_columns = [
-                "card_id", "card_type", "program", "module", "lesson", 
-                "success_rate", "first_try_success_rate", "success_diff", "complaint_rate"
+        # Добавляем таблицу с распределением "трики"-карточек по уровням "подлости"
+        st.markdown("### Распределение \"трики\"-карточек по уровням")
+        
+        # Создаем DataFrame для отображения статистики
+        tricky_stats = pd.DataFrame({
+            "Уровень подлости": ["Низкий (желтая зона)", "Средний (оранжевая зона)", "Высокий (красная зона)", "Все трики-карточки"],
+            "Количество": [low_tricky, medium_tricky, high_tricky, total_tricky],
+            "Процент от всех карточек": [low_percent, medium_percent, high_percent, tricky_percent],
+            "Процент от трики-карточек": [
+                low_tricky / total_tricky if total_tricky > 0 else 0,
+                medium_tricky / total_tricky if total_tricky > 0 else 0,
+                high_tricky / total_tricky if total_tricky > 0 else 0,
+                1.0 if total_tricky > 0 else 0
             ]
+        })
+        
+        # Форматируем проценты
+        tricky_stats["Процент от всех карточек"] = tricky_stats["Процент от всех карточек"].apply(lambda x: f"{x:.1%}")
+        tricky_stats["Процент от трики-карточек"] = tricky_stats["Процент от трики-карточек"].apply(lambda x: f"{x:.1%}")
+        
+        # Отображаем статистику
+        st.dataframe(tricky_stats, use_container_width=True)
+        
+        # Добавим визуализацию распределения карточек по уровням "подлости"
+        st.markdown("### Визуализация распределения \"трики\"-карточек по уровням")
+        
+        # Создаем данные для круговой диаграммы
+        if total_tricky > 0:
+            pie_data = pd.DataFrame({
+                "Уровень": ["Низкий", "Средний", "Высокий"],
+                "Количество": [low_tricky, medium_tricky, high_tricky],
+                "Цвет": ["yellow", "orange", "red"]
+            })
             
-            # Проверяем наличие URL-колонки
-            if "card_url" in tricky_df.columns:
-                # Создаем DataFrame для отображения с кликабельными ссылками
-                display_df = pd.DataFrame()
-                display_df["ID карточки"] = tricky_df.apply(
-                    lambda row: f"[{int(row['card_id'])}]({row['card_url']})" if pd.notna(row['card_url']) else str(int(row['card_id'])),
-                    axis=1
-                )
-                display_df["Тип"] = tricky_df["card_type"]
-                display_df["Общая успешность"] = tricky_df["success_rate"].apply(lambda x: f"{x:.1%}")
-                display_df["Успех с 1-й попытки"] = tricky_df["first_try_success_rate"].apply(lambda x: f"{x:.1%}")
-                display_df["Разница"] = tricky_df["success_diff"].apply(lambda x: f"{x:.1%}")
-                display_df["Жалобы"] = tricky_df["complaint_rate"].apply(lambda x: f"{x:.1%}")
-                display_df["Программа"] = tricky_df["program"]
-                
-                # Отображаем с кликабельными ссылками
-                st.dataframe(display_df, hide_index=True, use_container_width=True)
-            else:
-                # Отображаем обычную таблицу
-                st.dataframe(
-                    tricky_df[display_columns].style.format({
-                        "success_rate": "{:.1%}",
-                        "first_try_success_rate": "{:.1%}",
-                        "success_diff": "{:.1%}",
-                        "complaint_rate": "{:.1%}"
-                    }),
-                    use_container_width=True
-                )
+            fig_pie = px.pie(
+                pie_data,
+                values="Количество",
+                names="Уровень",
+                title=f"Распределение {total_tricky} трики-карточек по уровням подлости",
+                color="Уровень",
+                color_discrete_map={"Низкий": "yellow", "Средний": "orange", "Высокий": "red"}
+            )
+            
+            # Настройка подписей
+            fig_pie.update_traces(
+                textposition='inside',
+                textinfo='percent+label',
+                hoverinfo="label+percent+value",
+                marker=dict(line=dict(color='#000000', width=1))
+            )
+            
+            st.plotly_chart(fig_pie, use_container_width=True)
+        else:
+            st.info("Нет \"трики\"-карточек для отображения распределения по уровням.")
+        
+        # Отображение таблицы с трики-карточками
+        if total_tricky > 0:
+            st.markdown("### Список \"трики\"-карточек по уровням")
+            
+            # Создаем вкладки для разных уровней "подлости"
+            tricky_tabs = st.tabs(["Все трики-карточки", "Высокий уровень (красные)", 
+                                "Средний уровень (оранжевые)", "Низкий уровень (желтые)"])
+            
+            with tricky_tabs[0]:
+                # Все трики-карточки
+                tricky_df = working_df[working_df["is_tricky"]].sort_values("success_diff", ascending=False)
+                display_tricky_cards_table(tricky_df)
+            
+            with tricky_tabs[1]:
+                # Высокий уровень
+                high_tricky_df = working_df[working_df["is_high_tricky"]].sort_values("success_diff", ascending=False)
+                if len(high_tricky_df) > 0:
+                    display_tricky_cards_table(high_tricky_df)
+                else:
+                    st.info("Нет трики-карточек высокого уровня.")
+            
+            with tricky_tabs[2]:
+                # Средний уровень
+                medium_tricky_df = working_df[working_df["is_medium_tricky"]].sort_values("success_diff", ascending=False)
+                if len(medium_tricky_df) > 0:
+                    display_tricky_cards_table(medium_tricky_df)
+                else:
+                    st.info("Нет трики-карточек среднего уровня.")
+            
+            with tricky_tabs[3]:
+                # Низкий уровень
+                low_tricky_df = working_df[working_df["is_low_tricky"]].sort_values("success_diff", ascending=False)
+                if len(low_tricky_df) > 0:
+                    display_tricky_cards_table(low_tricky_df)
+                else:
+                    st.info("Нет трики-карточек низкого уровня.")
     # Вкладка тестирования
     with tabs[5]:
         st.subheader("Тестирование конфигурации на примере карточек")

@@ -1,3 +1,6 @@
+# Обновленный JSON для risk_config.json
+# Добавляем секцию tricky_cards в существующий файл
+
 {
     "discrimination": {
         "good": 0.35,
@@ -42,5 +45,18 @@
     "stats": {
         "significance_threshold": 100,
         "neutral_risk_value": 0.5
+    },
+    "tricky_cards": {
+        "basic": {
+            "min_success_rate": 0.70,
+            "max_first_try_rate": 0.60,
+            "min_difference": 0.20
+        },
+        "zones": {
+            "high_success_threshold": 0.90,
+            "medium_success_threshold": 0.80,
+            "low_first_try_threshold": 0.40,
+            "medium_first_try_threshold": 0.50
+        }
     }
 }
