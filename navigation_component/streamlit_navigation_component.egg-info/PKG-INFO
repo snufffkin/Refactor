@@ -1,0 +1,12 @@
+Metadata-Version: 2.1
+Name: streamlit-navigation-component
+Version: 0.1.0
+Summary: A custom navigation component for Streamlit
+Home-page: 
+Author: Your Name
+Author-email: your.email@example.com
+Requires-Python: >=3.6
+Description-Content-Type: text/plain
+Requires-Dist: streamlit>=0.63
+
+A custom navigation menu with hierarchical structure for Streamlit applications

@@ -749,6 +749,17 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Обрабатываем сообщения из iframe навигации для перехода
+st.markdown("""
+<script>
+window.addEventListener('message', event => {
+    if (event.data && event.data.type === 'navigate' && event.data.url) {
+        window.location.href = event.data.url;
+    }
+});
+</script>
+""", unsafe_allow_html=True)
+
 # Кэшируем только данные, но не engine
 @st.cache_data(ttl=3600)  # Уменьшаем время кэширования до 1 часа
 def load_cached_data(_engine):

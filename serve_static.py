@@ -140,4 +140,20 @@ def create_navigation_html(json_url, height=800):
     # Вставляем дополнительные стили после открывающего тега <head>
     html_content = html_content.replace('<head>', '<head>' + additional_styles)
     
+    # Добавляем скрипт: при клике на ссылку отправляем сообщение родителю для навигации
+    post_message_script = '''
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        document.body.addEventListener('click', event => {
+            const el = event.target.closest('a');
+            if (el && el.href) {
+                event.preventDefault();
+                window.parent.postMessage({ type: 'navigate', url: el.href }, '*');
+            }
+        });
+    });
+    </script>
+    '''
+    html_content = html_content.replace('</body>', post_message_script + '</body>')
+    
     return html_content
