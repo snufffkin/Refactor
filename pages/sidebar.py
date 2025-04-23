@@ -20,6 +20,9 @@ def sidebar_filters(df_full: pd.DataFrame, create_link_fn=None):
         df_full: DataFrame с данными
         create_link_fn: Функция для создания ссылок с параметрами URL
     """
+    # Импортируем components правильно
+    import streamlit.components.v1 as components
+    
     # Путь к JSON файлу
     json_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
                            "components", "navigation_data.json")
@@ -81,14 +84,15 @@ def sidebar_filters(df_full: pd.DataFrame, create_link_fn=None):
     </style>
     """
     
-    # Добавляем CSS опции
+    # Добавляем CSS опции через сайдбар
     st.sidebar.markdown(css_options, unsafe_allow_html=True)
     
     # Создаем HTML для навигации с URL к JSON
     html_content = create_navigation_html(json_url, sidebar_height)
     
-    # Отображаем компонент
-    components.html(html_content, height=sidebar_height, scrolling=True)
+    # Используем правильный способ для отображения HTML в сайдбаре
+    with st.sidebar:
+        components.html(html_content, height=sidebar_height, scrolling=True)
     
     # Неявно добавляем крошечную кнопку для обновления навигации (скрытую в нижней части сайдбара)
     with st.sidebar:
