@@ -665,7 +665,8 @@ st.markdown("""
     
     /* Прижать сайдбар к краю */
     section[data-testid="stSidebar"] {
-        width: 100% !important;
+        width: auto !important;
+        max-width: 320px !important;
         margin-left: 0 !important;
         padding-left: 0 !important;
     }

@@ -38,65 +38,13 @@ def sidebar_filters(df_full: pd.DataFrame, create_link_fn=None):
     # Сервируем JSON-файл
     json_url = serve_json(json_path)
     
-    # Очищаем заголовок сайдбара (используем пустой заголовок)
-    st.sidebar.markdown("<style>div[data-testid='stSidebarUserContent'] > div:first-child {display: none !important;}</style>", unsafe_allow_html=True)
-    
-    # Опции CSS для компонента
-    sidebar_height = 800  # Увеличиваем высоту, чтобы использовать все доступное пространство
-    css_options = f"""
-    <style>
-        /* Скрываем заголовки и прочие элементы в сайдбаре */
-        div[data-testid="stSidebar"] .block-container {{
-            padding-top: 0 !important;
-        }}
-        
-        /* Настройки для HTML компонента */
-        div[data-testid="stSidebar"] iframe {{
-            border: none !important;
-            width: 100% !important;
-            height: {sidebar_height}px !important;
-            overflow: auto !important;
-        }}
-        
-        /* Скрываем стандартный скролл и добавляем свой */
-        div[data-testid="stSidebar"] {{
-            overflow-y: hidden !important;
-            scrollbar-width: thin !important;
-        }}
-        
-        /* Убираем внутренние отступы в сайдбаре */
-        section[data-testid="stSidebar"] > div {{
-            padding-top: 0 !important;
-            padding-right: 0 !important;
-            padding-left: 0 !important;
-            padding-bottom: 0 !important;
-        }}
-        
-        /* Скрываем все стандартные заголовки h3 в сайдбаре */
-        div[data-testid="stSidebar"] h3 {{
-            display: none !important;
-        }}
-        
-        /* Скрываем все прочие элементы в сайдбаре, кроме iframe */
-        div[data-testid="stSidebar"] > div > div > div:not(:first-child) {{
-            display: none !important;
-        }}
-    </style>
-    """
-    
-    # Добавляем CSS опции через сайдбар
-    st.sidebar.markdown(css_options, unsafe_allow_html=True)
+    # Определяем высоту HTML-компонента для отображения
+    sidebar_height = 800
     
     # Создаем HTML для навигации с URL к JSON
     html_content = create_navigation_html(json_url, sidebar_height)
     
     # Используем правильный способ для отображения HTML в сайдбаре
     with st.sidebar:
+        # Включаем внутренний скролл iframe
         components.html(html_content, height=sidebar_height, scrolling=True)
-    
-    # Неявно добавляем крошечную кнопку для обновления навигации (скрытую в нижней части сайдбара)
-    with st.sidebar:
-        # Добавляем кнопку обновления, но делаем её очень маленькой и незаметной
-        if st.button("↻", help="Обновить навигацию", key="tiny_update_button"):
-            st.session_state["update_navigation"] = True
-            st.rerun()

@@ -102,22 +102,34 @@ def create_navigation_html(json_url, height=800):
     # Добавляем дополнительные стили для максимального использования пространства
     additional_styles = """
     <style>
-        /* Стили для максимального использования пространства */
+        /* Глобальные стили скроллбара внутри iframe */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.1);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        /* Общие стили для контента навигации */
         body, html {
             margin: 0;
             padding: 0;
             height: 100%;
             overflow: hidden;
         }
-        
         .sidebar-menu {
             width: 100%;
             height: 100%;
             overflow-y: auto;
-            padding-bottom: 60px; /* Место для скрытой кнопки обновления */
+            padding-bottom: 0;
         }
-        
-        /* Убираем лишние заголовки, если есть */
         .section-title:first-child {
             margin-top: 0;
             padding-top: 10px;
