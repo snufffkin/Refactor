@@ -453,25 +453,53 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
     st.dataframe(display_df, hide_index=True, use_container_width=True)
     
     # 6. Кнопки для быстрого перехода к анализу отдельных карточек
-    st.subheader("🔍 Анализ отдельных карточек")
-    
-    # Создаем список карточек с высоким риском
-    high_risk_cards = df_gz[df_gz["risk"] > 0.5].sort_values("risk", ascending=False)
-    
-    if not high_risk_cards.empty:
-        st.markdown("### Карточки с высоким риском")
+    st.subheader("🔍 Все карточки в группе заданий")
+
+    # Создаем кнопки для быстрого перехода ко всем карточкам
+    cards = df_gz.sort_values("risk", ascending=False).copy()
+
+    # Мы будем отображать карточки группами, по 4 в строке
+    CARDS_PER_ROW = 4
+    rows = (len(cards) + CARDS_PER_ROW - 1) // CARDS_PER_ROW  # Округление вверх
+
+    for row_idx in range(rows):
+        cols = st.columns(CARDS_PER_ROW)
         
-        # Создаем кнопки для быстрого перехода
-        cols = st.columns(4)
-        for i, (_, card) in enumerate(high_risk_cards.iterrows()):
-            col_idx = i % 4
+        for col_idx in range(CARDS_PER_ROW):
+            card_idx = row_idx * CARDS_PER_ROW + col_idx
+            
+            # Если индекс выходит за пределы списка карточек, пропускаем
+            if card_idx >= len(cards):
+                continue
+                
             with cols[col_idx]:
+                card = cards.iloc[card_idx]
                 card_id = int(card["card_id"])
                 risk = card["risk"]
                 card_type = card["card_type"]
                 
-                # Создаем цвет на основе риска
-                color = "red" if risk > 0.75 else "orange"
+                # Определяем цвет на основе риска
+                if risk > 0.75:
+                    color = "red"
+                elif risk > 0.5:
+                    color = "orange"
+                elif risk > 0.25:
+                    color = "gold"
+                else:
+                    color = "green"
+                
+                # Создаем дополнительные обозначения для специальных карточек
+                special_flags = []
+                if card["trickiness_level"] > 0:
+                    trickiness_level = trickiness_categories.get(int(card["trickiness_level"]), "")
+                    if trickiness_level:
+                        special_flags.append(f"📊 Подлость: {trickiness_level}")
+                        
+                if card["discrimination_avg"] < 0.15:
+                    special_flags.append("📉 Низкая дискр.")
+                    
+                if card["complaint_rate"] > 0.05:
+                    special_flags.append("⚠️ Жалобы")
                 
                 # Используем create_link_fn для создания URL, если функция доступна
                 if create_link_fn:
@@ -480,18 +508,14 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
                     # Относительный URL как запасной вариант
                     card_url = f"?page=cards&card_id={card_id}"
                 
-                # Создаем кнопку с соответствующим цветом
+                # Создаем кнопку с соответствующим цветом и дополнительной информацией
                 st.markdown(
                     f"<a href='{card_url}' target='_self' "
-                    f"style='text-decoration:none;color:{color};'>"
-                    f"ID: {card_id} - Риск: {risk:.2f} - {card_type}</a>",
+                    f"style='text-decoration:none;color:{color};display:block;margin-bottom:8px;'>"
+                    f"ID: {card_id} - Риск: {risk:.2f} - {card_type}</a>"
+                    + (f"<div style='font-size:0.8em;color:#777;'>{' | '.join(special_flags)}</div>" if special_flags else ""),
                     unsafe_allow_html=True
                 )
-                
-                # Ограничиваем количество отображаемых карточек
-                if i >= 11:  # Показываем максимум 12 карточек
-                    st.markdown(f"И еще {len(high_risk_cards) - 12} карточек...")
-                    break
     
     # Создаем список трики-карточек
     tricky_cards = df_gz[df_gz["trickiness_level"] > 0].sort_values("trickiness_level", ascending=False)
