@@ -566,3 +566,73 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
                 if i >= 11:  # Показываем максимум 12 карточек
                     st.markdown(f"И еще {len(low_discr_cards) - 12} карточек...")
                     break
+
+def _page_gz_inline(df: pd.DataFrame):
+    """Встроенная версия страницы групп заданий для отображения на странице урока"""
+    # Фильтруем данные по выбранной программе, модулю и уроку
+    df_lesson = core.apply_filters(df, ["program", "module", "lesson"])
+    
+    # Проверка наличия данных после фильтрации
+    if df_lesson.empty:
+        lesson_name = st.session_state.get('filter_lesson') or '—'
+        st.warning(f"Нет данных для урока '{lesson_name}'")
+        return
+    
+    # Заголовок
+    st.subheader("🧩 Группы заданий выбранного урока")
+    
+    # Агрегируем данные по группам заданий
+    agg = df_lesson.groupby("gz").agg(
+        risk=("risk", "mean"),
+        success=("success_rate", "mean"),
+        complaints=("complaint_rate", "mean"),
+        cards=("card_id", "nunique")
+    ).reset_index()
+    
+    # Добавляем нумерацию для групп заданий
+    agg = agg.sort_values("risk", ascending=False).reset_index(drop=True)
+    agg["gz_num"] = agg.index + 1
+    
+    # Создаем график
+    fig = px.bar(
+        agg,
+        x="gz_num",  # Используем последовательную нумерацию
+        y="risk",
+        color="risk",
+        color_continuous_scale="RdYlGn_r",
+        labels={"gz_num": "Номер группы заданий", "risk": "Риск"},
+        title="Уровень риска по группам заданий",
+        hover_data=["gz", "success", "complaints", "cards"]  # Показываем реальный ID в подсказке
+    )
+    
+    # Форматируем подсказки
+    fig.update_traces(
+        hovertemplate="<b>%{customdata[0]}</b><br>" +
+                      "Номер: %{x}<br>" +
+                      "Риск: %{y:.2f}<br>" +
+                      "Успешность: %{customdata[1]:.1%}<br>" +
+                      "Жалобы: %{customdata[2]:.1%}<br>" +
+                      "Карточек: %{customdata[3]}"
+    )
+    
+    fig.update_layout(
+        xaxis_tickangle=0  # Убираем наклон, т.к. числа компактны
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Таблица с группами заданий, добавляем номер для соответствия с графиком
+    table_df = agg[["gz_num", "gz", "risk", "success", "complaints", "cards"]]
+    table_df.columns = ["Номер", "Группа заданий", "Риск", "Успешность", "Жалобы", "Карточек"]
+    
+    st.dataframe(
+        table_df.style.format({
+            "Риск": "{:.2f}",
+            "Успешность": "{:.1%}",
+            "Жалобы": "{:.1%}"
+        }),
+        use_container_width=True
+    )
+    
+    # Список кликабельных групп заданий
+    display_clickable_items(df_lesson, "gz", "gz", metrics=["cards", "risk"])
