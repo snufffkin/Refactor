@@ -1,4 +1,4 @@
-# pages/sidebar.py
+# pages/sidebar.py с поддержкой URL-навигации
 """
 Компоненты боковой панели
 """
@@ -8,13 +8,75 @@ import pandas as pd
 
 import core
 
-def sidebar_filters(df_full: pd.DataFrame):
-    """Каскадные фильтры в сайдбаре — опции зависят от уже выбранных уровней."""
+def sidebar_filters(df_full: pd.DataFrame, create_link_fn=None):
+    """
+    Каскадные фильтры в сайдбаре — опции зависят от уже выбранных уровней.
+    
+    Args:
+        df_full: DataFrame с данными
+        create_link_fn: Функция для создания ссылок с параметрами URL
+    """
     st.sidebar.header("Фильтры")
     ctx = df_full.copy()
+    
+    # Текущая страница (если есть)
+    current_page = st.session_state.get("page", "Обзор").lower()
+    if current_page == "⚙️ настройки":
+        current_page = "admin"
+
+    # Создаем функцию для сброса фильтров с обновлением URL
+    def reset_filter(level):
+        """Сбрасывает фильтр и дочерние фильтры"""
+        # Сначала сбрасываем значение в session_state
+        st.session_state[f"filter_{level}"] = None
+        core.reset_child(level)  # Сбросить дочерние фильтры при сбросе родительского
+        
+        # Если доступна функция создания ссылок, перенаправляем на новый URL
+        if create_link_fn:
+            # Собираем текущие активные фильтры
+            params = {}
+            for col in core.FILTERS:
+                filter_value = st.session_state.get(f"filter_{col}")
+                if filter_value:
+                    params[col] = filter_value
+            
+            # Создаем новый URL с текущими фильтрами (без сброшенного)
+            new_url = create_link_fn(current_page, **params)
+            st.experimental_set_query_params(**params, page=current_page)
+
+    # Создаем функцию для установки фильтра с обновлением URL
+    def set_filter(level, value):
+        """Устанавливает фильтр и обновляет URL"""
+        # Сначала устанавливаем значение в session_state
+        st.session_state[f"filter_{level}"] = value
+        
+        # Если доступна функция создания ссылок, перенаправляем на новый URL
+        if create_link_fn:
+            # Собираем текущие активные фильтры
+            params = {}
+            for col in core.FILTERS:
+                filter_value = st.session_state.get(f"filter_{col}")
+                if filter_value:
+                    params[col] = filter_value
+            
+            # Определяем, какую страницу показывать на основе выбранных фильтров
+            target_page = current_page
+            
+            # Если меняется уровень, меняем и страницу
+            if level == "program" and value is not None:
+                target_page = "programs"
+            elif level == "module" and value is not None:
+                target_page = "modules"
+            elif level == "lesson" and value is not None:
+                target_page = "lessons"
+            elif level == "gz" and value is not None:
+                target_page = "gz"
+            
+            # Устанавливаем новые параметры URL
+            st.experimental_set_query_params(**params, page=target_page)
 
     for col in core.FILTERS:
-        # сжимаем контекст ОПЕРЕЖАЮЩЕ, если родитель уже выбран
+        # Сжимаем контекст ОПЕРЕЖАЮЩЕ, если родитель уже выбран
         for prev_col in core.FILTERS[:core.FILTERS.index(col)]:
             prev_val = st.session_state.get(f"filter_{prev_col}")
             if prev_val:
@@ -25,19 +87,22 @@ def sidebar_filters(df_full: pd.DataFrame):
         if current not in options:
             current = "Все"
 
+        # Используем ключ без "sb_" префикса, чтобы избежать путаницы
         sel = st.sidebar.selectbox(
             col.capitalize(),
             options,
             index=options.index(current),
-            key=f"sb_{col}",
+            key=f"sidebar_{col}"
         )
 
+        # Обрабатываем изменение фильтра с учетом URL-навигации
         if sel == "Все":
-            st.session_state[f"filter_{col}"] = None
-            core.reset_child(col)  # Сбросить дочерние фильтры при сбросе родительского
+            if st.session_state.get(f"filter_{col}"):
+                reset_filter(col)
         else:
-            st.session_state[f"filter_{col}"] = sel
-            
+            if st.session_state.get(f"filter_{col}") != sel:
+                set_filter(col, sel)
+    
     # Добавляем разделитель
     st.sidebar.markdown("---")
     

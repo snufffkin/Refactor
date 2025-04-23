@@ -590,3 +590,5 @@ def _page_gz_inline(df: pd.DataFrame):
     
     # Список кликабельных групп заданий
     display_clickable_items(df_lesson, "gz", "gz", metrics=["cards", "risk"])
+
+    

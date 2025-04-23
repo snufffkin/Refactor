@@ -1,4 +1,4 @@
-# components/utils.py
+# components/utils.py с поддержкой URL-навигации
 """
 Вспомогательные функции для компонентов интерфейса
 """
@@ -17,6 +17,7 @@ def create_hierarchical_header(levels, values, emoji_map=None):
         emoji_map: Словарь с эмодзи для каждого уровня
     """
     import core
+    import urllib.parse as ul
     
     if emoji_map is None:
         emoji_map = {
@@ -26,6 +27,11 @@ def create_hierarchical_header(levels, values, emoji_map=None):
             "gz": "🧩",
             "card": "🗂️"
         }
+    
+    # Текущая страница
+    current_page = st.session_state.get("page", "Обзор").lower()
+    if current_page == "⚙️ настройки":
+        current_page = "admin"
     
     # Заголовок страницы
     current_level = levels[-1]
@@ -44,15 +50,33 @@ def create_hierarchical_header(levels, values, emoji_map=None):
     with nav_col2:
         for i, value in enumerate(values):
             if value and i < len(levels):  # Проверяем, что значение существует и уровень соответствует
-                # Создаем кликабельную ссылку, используя функцию clickable
+                # Определяем, на какую страницу вести при клике
                 level = levels[i]
-                core.clickable(value, level)
+                target_page = level + "s"  # Например, program -> programs
+                if level == "gz":
+                    target_page = "gz"  # Особый случай для ГЗ
+                
+                # Собираем параметры для URL
+                params = {}
+                for j, l in enumerate(levels[:i+1]):
+                    if values[j]:
+                        params[l] = values[j]
+                
+                # Создаем ссылку
+                url = "?" + "&".join([f"{k}={ul.quote_plus(str(v))}" for k, v in params.items()]) + f"&page={target_page}"
+                
+                st.markdown(
+                    f'<a href="{url}" target="_self" '
+                    'style="text-decoration:none;color:#4da6ff;font-weight:600;">'
+                    f'{value}</a>',
+                    unsafe_allow_html=True,
+                )
             else:
                 st.markdown(f"**{value or '—'}**")
     
     # Добавляем разделитель
     st.markdown("---")
-    
+
 def display_clickable_items(df, column, level, metrics=None):
     """
     Отображает список кликабельных элементов в две колонки
@@ -63,7 +87,7 @@ def display_clickable_items(df, column, level, metrics=None):
         level: Уровень для перехода при клике
         metrics: Список метрик для отображения рядом с элементом
     """
-    import core
+    import urllib.parse as ul
     
     # Получаем уникальные значения и метрики для них
     if metrics:
@@ -86,6 +110,19 @@ def display_clickable_items(df, column, level, metrics=None):
     
     half = len(sorted_df) // 2 + len(sorted_df) % 2
     
+    # Собираем текущие фильтры
+    current_filters = {}
+    for filter_col in ["program", "module", "lesson", "gz"]:
+        if st.session_state.get(f"filter_{filter_col}"):
+            current_filters[filter_col] = st.session_state[f"filter_{filter_col}"]
+    
+    # Определяем целевую страницу
+    target_page = level + "s"  # Например, program -> programs
+    if level == "gz":
+        target_page = "gz"  # Особый случай для ГЗ
+    elif level == "card":
+        target_page = "cards"
+    
     for i, (_, row) in enumerate(sorted_df.iterrows()):
         # Определяем, в какую колонку добавить элемент
         current_col = col1 if i < half else col2
@@ -93,7 +130,20 @@ def display_clickable_items(df, column, level, metrics=None):
         with current_col:
             c1, c2 = st.columns([4, 3])
             with c1:
-                core.clickable(row[column], level)
+                # Создаем параметры URL
+                url_params = current_filters.copy()
+                url_params[level] = row[column]
+                
+                # Создаем URL
+                url = "?" + "&".join([f"{k}={ul.quote_plus(str(v))}" for k, v in url_params.items()]) + f"&page={target_page}"
+                
+                # Создаем ссылку
+                st.markdown(
+                    f'<a href="{url}" target="_self" '
+                    'style="text-decoration:none;color:#4da6ff;font-weight:600;">'
+                    f'{row[column]}</a>',
+                    unsafe_allow_html=True,
+                )
             with c2:
                 if metrics:
                     # Создаем строку с метриками
