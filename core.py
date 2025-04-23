@@ -149,8 +149,9 @@ def complaint_risk_score(row):
     
     Parameters:
     -----------
-    row : pd.Series
-        Строка DataFrame с данными карточки. Должна содержать поле 'complaints_total'
+    row : pd.Series или dict
+        Строка DataFrame с данными карточки или словарь с данными.
+        Должен содержать поле 'complaints_total' или 'complaint_rate' и 'total_attempts'
         
     Returns:
     --------
@@ -166,11 +167,39 @@ def complaint_risk_score(row):
     COMPLAINTS_MEDIUM = config["complaints"]["medium"]
     
     # Получаем абсолютное количество жалоб
-    complaints_total = row.complaints_total if 'complaints_total' in row else 0
+    complaints_total = 0
     
+    # Если row - словарь
+    if isinstance(row, dict):
+        if 'complaints_total' in row:
+            complaints_total = row['complaints_total']
+        elif 'complaint_rate' in row and 'total_attempts' in row:
+            complaints_total = row['complaint_rate'] * row['total_attempts']
+    # Если row - pandas Series или другой объект с методом get
+    elif hasattr(row, 'get'):
+        complaints_total = row.get('complaints_total', 0)
+        if complaints_total == 0 and 'complaint_rate' in row and 'total_attempts' in row:
+            complaints_total = row['complaint_rate'] * row['total_attempts']
+    # Если row - объект с атрибутами
+    else:
+        try:
+            if hasattr(row, 'complaints_total'):
+                complaints_total = row.complaints_total
+            elif hasattr(row, 'complaint_rate') and hasattr(row, 'total_attempts'):
+                complaints_total = row.complaint_rate * row.total_attempts
+        except Exception:
+            # В случае ошибки используем нулевое значение
+            complaints_total = 0
+    
+    # Проверяем, что complaints_total имеет числовой тип
+    try:
+        complaints_total = float(complaints_total)
+    except (ValueError, TypeError):
+        complaints_total = 0
+    
+    # Расчет риска на основе количества жалоб
     if complaints_total > COMPLAINTS_CRITICAL:
         # Критический уровень жалоб (0.76-1.0)
-        # Чем выше значение, тем выше риск
         excess = min(100, complaints_total - COMPLAINTS_CRITICAL)  # Ограничиваем избыток до 100
         normalized = excess / 100
         return 0.76 + normalized * 0.24  # 0.76-1.0
@@ -184,7 +213,7 @@ def complaint_risk_score(row):
         return 0.26 + normalized * 0.24  # 0.26-0.50
     else:
         # Низкий уровень жалоб (0-0.25)
-        normalized = complaints_total / COMPLAINTS_MEDIUM
+        normalized = complaints_total / max(1, COMPLAINTS_MEDIUM)
         return normalized * 0.25  # 0-0.25
 
 def attempted_share_risk_score(attempted_share):
