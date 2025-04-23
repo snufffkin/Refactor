@@ -16,7 +16,7 @@ from components.utils import create_hierarchical_header, display_clickable_items
 from components.metrics import display_metrics_row, display_status_chart, display_risk_distribution
 from components.charts import display_cards_chart, display_risk_bar_chart, display_metrics_comparison, display_success_complaints_chart, display_completion_radar, display_trickiness_chart, display_trickiness_success_chart
 
-def page_gz(df: pd.DataFrame):
+def page_gz(df: pd.DataFrame, create_link_fn=None):
     """Страница группы заданий с детализацией по карточкам"""
     # Фильтруем данные по выбранной программе, модулю, уроку и группе заданий
     df_gz = core.apply_filters(df, ["program", "module", "lesson", "gz"])
@@ -296,10 +296,19 @@ def page_gz(df: pd.DataFrame):
                 display_df["Уровень подлости"] = tricky_table["Уровень подлости"]
                 display_df["Риск"] = tricky_table["risk"].apply(lambda x: f"{x:.2f}")
                 
-                # Добавляем ссылки на карточки, если доступны URL
-                if "card_url" in tricky_cards.columns:
-                    display_df["Ссылка"] = tricky_cards.apply(
-                        lambda row: f"[Анализ](/cards?card_id={row['card_id']})" if pd.notna(row['card_id']) else "-", 
+                # Добавляем ссылки на карточки
+                # Используем create_link_fn для создания URL, если функция доступна
+                if create_link_fn:
+                    display_df["Действия"] = tricky_cards.apply(
+                        lambda row: f"[Детальный анализ]({create_link_fn('cards', card_id=int(row['card_id']))})" 
+                        if pd.notna(row['card_id']) else "-", 
+                        axis=1
+                    )
+                else:
+                    # Относительный URL как запасной вариант
+                    display_df["Действия"] = tricky_cards.apply(
+                        lambda row: f"[Детальный анализ](?page=cards&card_id={int(row['card_id'])})" 
+                        if pd.notna(row['card_id']) else "-", 
                         axis=1
                     )
                 
@@ -362,9 +371,18 @@ def page_gz(df: pd.DataFrame):
             display_df["Риск"] = low_discr_cards["risk"].apply(lambda x: f"{x:.2f}")
             
             # Добавляем ссылки на карточки
-            if "card_url" in low_discr_cards.columns:
-                display_df["Ссылка"] = low_discr_cards.apply(
-                    lambda row: f"[Анализ](/cards?card_id={row['card_id']})" if pd.notna(row['card_id']) else "-", 
+            # Используем create_link_fn для создания URL, если функция доступна
+            if create_link_fn:
+                display_df["Действия"] = low_discr_cards.apply(
+                    lambda row: f"[Детальный анализ]({create_link_fn('cards', card_id=int(row['card_id']))})" 
+                    if pd.notna(row['card_id']) else "-", 
+                    axis=1
+                )
+            else:
+                # Относительный URL как запасной вариант
+                display_df["Действия"] = low_discr_cards.apply(
+                    lambda row: f"[Детальный анализ](?page=cards&card_id={int(row['card_id'])})" 
+                    if pd.notna(row['card_id']) else "-", 
                     axis=1
                 )
             
@@ -411,10 +429,18 @@ def page_gz(df: pd.DataFrame):
     display_df["Подлость"] = cards_df["trickiness_level"].map(trickiness_categories)
     
     # Добавляем ссылки на страницу детального анализа карточки
-    display_df["Действия"] = cards_df.apply(
-        lambda row: f"[Детальный анализ](/cards?card_id={row['card_id']})" if pd.notna(row['card_id']) else "-", 
-        axis=1
-    )
+    if create_link_fn:
+        display_df["Действия"] = cards_df.apply(
+            lambda row: f"[Детальный анализ]({create_link_fn('cards', card_id=int(row['card_id']))})" 
+            if pd.notna(row['card_id']) else "-", 
+            axis=1
+        )
+    else:
+        display_df["Действия"] = cards_df.apply(
+            lambda row: f"[Детальный анализ](?page=cards&card_id={int(row['card_id'])})" 
+            if pd.notna(row['card_id']) else "-", 
+            axis=1
+        )
     
     # Добавляем ссылки на карточки в редакторе, если доступны URL
     if "card_url" in df_gz.columns:
@@ -447,9 +473,16 @@ def page_gz(df: pd.DataFrame):
                 # Создаем цвет на основе риска
                 color = "red" if risk > 0.75 else "orange"
                 
+                # Используем create_link_fn для создания URL, если функция доступна
+                if create_link_fn:
+                    card_url = create_link_fn("cards", card_id=card_id)
+                else:
+                    # Относительный URL как запасной вариант
+                    card_url = f"?page=cards&card_id={card_id}"
+                
                 # Создаем кнопку с соответствующим цветом
                 st.markdown(
-                    f"<a href='/cards?card_id={card_id}' target='_self' "
+                    f"<a href='{card_url}' target='_self' "
                     f"style='text-decoration:none;color:{color};'>"
                     f"ID: {card_id} - Риск: {risk:.2f} - {card_type}</a>",
                     unsafe_allow_html=True
@@ -478,10 +511,17 @@ def page_gz(df: pd.DataFrame):
                 # Создаем цвет на основе уровня подлости
                 color = "red" if trickiness == 3 else ("orange" if trickiness == 2 else "gold")
                 
+                # Используем create_link_fn для создания URL, если функция доступна
+                if create_link_fn:
+                    card_url = create_link_fn("cards", card_id=card_id)
+                else:
+                    # Относительный URL как запасной вариант
+                    card_url = f"?page=cards&card_id={card_id}"
+                
                 # Создаем кнопку с соответствующим цветом
                 trickiness_text = trickiness_categories.get(trickiness, "")
                 st.markdown(
-                    f"<a href='/cards?card_id={card_id}' target='_self' "
+                    f"<a href='{card_url}' target='_self' "
                     f"style='text-decoration:none;color:{color};'>"
                     f"ID: {card_id} - Подлость: {trickiness_text} - {card_type}</a>",
                     unsafe_allow_html=True
@@ -507,9 +547,16 @@ def page_gz(df: pd.DataFrame):
                 discr = card["discrimination_avg"]
                 card_type = card["card_type"]
                 
+                # Используем create_link_fn для создания URL, если функция доступна
+                if create_link_fn:
+                    card_url = create_link_fn("cards", card_id=card_id)
+                else:
+                    # Относительный URL как запасной вариант
+                    card_url = f"?page=cards&card_id={card_id}"
+                
                 # Создаем кнопку
                 st.markdown(
-                    f"<a href='/cards?card_id={card_id}' target='_self' "
+                    f"<a href='{card_url}' target='_self' "
                     f"style='text-decoration:none;color:purple;'>"
                     f"ID: {card_id} - Дискр.: {discr:.2f} - {card_type}</a>",
                     unsafe_allow_html=True
@@ -519,76 +566,3 @@ def page_gz(df: pd.DataFrame):
                 if i >= 11:  # Показываем максимум 12 карточек
                     st.markdown(f"И еще {len(low_discr_cards) - 12} карточек...")
                     break
-
-
-def _page_gz_inline(df: pd.DataFrame):
-    """Встроенная версия страницы групп заданий для отображения на странице урока"""
-    # Фильтруем данные по выбранной программе, модулю и уроку
-    df_lesson = core.apply_filters(df, ["program", "module", "lesson"])
-    
-    # Проверка наличия данных после фильтрации
-    if df_lesson.empty:
-        lesson_name = st.session_state.get('filter_lesson') or '—'
-        st.warning(f"Нет данных для урока '{lesson_name}'")
-        return
-    
-    # Заголовок
-    st.subheader("🧩 Группы заданий выбранного урока")
-    
-    # Агрегируем данные по группам заданий
-    agg = df_lesson.groupby("gz").agg(
-        risk=("risk", "mean"),
-        success=("success_rate", "mean"),
-        complaints=("complaint_rate", "mean"),
-        cards=("card_id", "nunique")
-    ).reset_index()
-    
-    # Добавляем нумерацию для групп заданий
-    agg = agg.sort_values("risk", ascending=False).reset_index(drop=True)
-    agg["gz_num"] = agg.index + 1
-    
-    # Создаем график
-    fig = px.bar(
-        agg,
-        x="gz_num",  # Используем последовательную нумерацию
-        y="risk",
-        color="risk",
-        color_continuous_scale="RdYlGn_r",
-        labels={"gz_num": "Номер группы заданий", "risk": "Риск"},
-        title="Уровень риска по группам заданий",
-        hover_data=["gz", "success", "complaints", "cards"]  # Показываем реальный ID в подсказке
-    )
-    
-    # Форматируем подсказки
-    fig.update_traces(
-        hovertemplate="<b>%{customdata[0]}</b><br>" +
-                      "Номер: %{x}<br>" +
-                      "Риск: %{y:.2f}<br>" +
-                      "Успешность: %{customdata[1]:.1%}<br>" +
-                      "Жалобы: %{customdata[2]:.1%}<br>" +
-                      "Карточек: %{customdata[3]}"
-    )
-    
-    fig.update_layout(
-        xaxis_tickangle=0  # Убираем наклон, т.к. числа компактны
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Таблица с группами заданий, добавляем номер для соответствия с графиком
-    table_df = agg[["gz_num", "gz", "risk", "success", "complaints", "cards"]]
-    table_df.columns = ["Номер", "Группа заданий", "Риск", "Успешность", "Жалобы", "Карточек"]
-    
-    st.dataframe(
-        table_df.style.format({
-            "Риск": "{:.2f}",
-            "Успешность": "{:.1%}",
-            "Жалобы": "{:.1%}"
-        }),
-        use_container_width=True
-    )
-    
-    # Список кликабельных групп заданий
-    display_clickable_items(df_lesson, "gz", "gz", metrics=["cards", "risk"])
-
-    

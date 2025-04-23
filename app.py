@@ -182,7 +182,7 @@ PAGES = {
     "Программы": pages.page_programs,
     "Модули": pages.page_modules,
     "Уроки": pages.page_lessons,
-    "ГЗ": pages.page_gz,
+    "ГЗ": lambda df: pages.page_gz(df, create_page_link),  # Передаем функцию создания ссылок
     "Карточки": lambda df: pages.page_cards(df, engine),
     "⚙️ Настройки": pages.page_admin,
 }
