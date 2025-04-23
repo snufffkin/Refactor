@@ -25,7 +25,7 @@ html_path = os.path.join(components_dir, "navigation.html")
 # Копируем HTML из артефакта если файл не существует
 if not os.path.exists(html_path):
     with open(html_path, 'w', encoding='utf-8') as f:
-        f.write("""<!DOCTYPE html>
+        f.write(r"""<!DOCTYPE html>
 <html>
 <head>
     <style>

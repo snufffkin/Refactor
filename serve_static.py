@@ -16,7 +16,7 @@ def serve_json(path, key=None):
     
     Args:
         path: Путь к JSON-файлу
-        key: Уникальный ключ для компонента (опционально)
+        key: Уникальный ключ для компонента (опционально) - не используется в текущей версии
         
     Returns:
         str: URL для доступа к JSON-файлу
@@ -56,13 +56,13 @@ def serve_json(path, key=None):
     </div>
     """
     
-    # Рендерим компонент
-    components.html(html, height=0, key=key or "json_server")
+    # Рендерим компонент БЕЗ ключа
+    components.html(html, height=0)
     
     # Возвращаем URL для доступа к JSON
     return f"data:application/json;base64,{json_b64}"
 
-def create_navigation_html(json_url, height=600):
+def create_navigation_html(json_url, height=800):
     """
     Создает HTML-компонент для навигации с указанным URL для JSON
     
@@ -98,5 +98,34 @@ def create_navigation_html(json_url, height=600):
         'const response = await fetch(\'../navigation_data.json\');',
         f'const response = await fetch(\'{json_url}\');'
     )
+    
+    # Добавляем дополнительные стили для максимального использования пространства
+    additional_styles = """
+    <style>
+        /* Стили для максимального использования пространства */
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+        }
+        
+        .sidebar-menu {
+            width: 100%;
+            height: 100%;
+            overflow-y: auto;
+            padding-bottom: 60px; /* Место для скрытой кнопки обновления */
+        }
+        
+        /* Убираем лишние заголовки, если есть */
+        .section-title:first-child {
+            margin-top: 0;
+            padding-top: 10px;
+        }
+    </style>
+    """
+    
+    # Вставляем дополнительные стили после открывающего тега <head>
+    html_content = html_content.replace('<head>', '<head>' + additional_styles)
     
     return html_content

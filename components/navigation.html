@@ -42,7 +42,7 @@
         }
         .nav-link-container {
             display: flex;
-            align-items: center;
+            align-items: flex-start; /* Вместо center - выравниваем по верху */
             justify-content: space-between;
             padding: 6px 10px;
             border-radius: 4px;
@@ -57,7 +57,7 @@
         }
         .nav-link {
             display: flex;
-            align-items: center;
+            align-items: flex-start; /* Вместо center */
             flex-grow: 1;
             text-decoration: none;
             color: rgba(255, 255, 255, 0.9);
@@ -68,6 +68,7 @@
             height: 8px;
             border-radius: 50%;
             margin-right: 8px;
+            margin-top: 5px; /* Добавляем отступ сверху для выравнивания с текстом */
         }
         .nav-circle.blue {
             background-color: #4da6ff;
@@ -83,9 +84,16 @@
         }
         .nav-page-name {
             flex-grow: 1;
-            white-space: nowrap;
+            /* Изменяем эти свойства */
+            white-space: normal; /* Вместо nowrap */
+            word-wrap: break-word;
+            word-break: break-word;
+            overflow-wrap: break-word;
+            /* Ограничиваем по высоте с многоточием */
+            /* max-height: 2.8em; */
             overflow: hidden;
-            text-overflow: ellipsis;
+            /* text-overflow: ellipsis; */
+            line-height: 1.4;
         }
         .nav-page-name.active {
             font-weight: 600;
@@ -119,6 +127,7 @@
         .icon {
             margin-right: 8px;
             font-size: 16px;
+            margin-top: 2px; /* Добавляем отступ сверху для выравнивания с текстом */
         }
         
         /* Дополнительные стили для разделов */
@@ -186,31 +195,40 @@
         
         <div class="nav-separator"></div>
         
-        <div class="section-title">Фильтры</div>
-        <ul class="nav-list" id="filters-nav">
-            <li class="nav-item">
-                <div class="nav-link-container" id="nav-filters">
-                    <span class="nav-link">
-                        <span class="icon">🔍</span>
-                        <span class="nav-page-name">Расширенные фильтры</span>
-                    </span>
-                    <div class="nav-accordion" onclick="toggleSubmenu('filters-submenu')">
-                        <span class="nav-accordion-icon open">+</span>
-                    </div>
-                </div>
-                <ul class="nav-list" id="filters-submenu">
-                    <li class="nav-item filter-item">
-                        <div class="filter-placeholder">
-                            Фильтры доступны в боковой панели Streamlit
-                        </div>
-                    </li>
-                </ul>
-            </li>
-        </ul>
     </div>
 
     <script>
         // Функция для получения текущих URL-параметров
+        function formatLongName(name, maxLength = 60) {
+            if (!name || name.length <= maxLength) return name;
+            
+            // Регулярное выражение для вставки переносов через каждые maxLength символов
+            // но только если там нет пробела, запятой или точки
+            let result = '';
+            let charCount = 0;
+            
+            for (let i = 0; i < name.length; i++) {
+                result += name[i];
+                charCount++;
+                
+                // Если достигли maxLength символов, проверяем следующий символ
+                if (charCount >= maxLength && i < name.length - 1) {
+                    // Если следующий символ не пробел/точка/запятая, добавляем перенос
+                    if (!/[\s.,]/.test(name[i+1])) {
+                        result += '<wbr>'; // Используем wbr для возможности переноса
+                    }
+                    charCount = 0;
+                }
+                
+                // Сбрасываем счетчик после пробела, точки или запятой
+                if (/[\s.,]/.test(name[i])) {
+                    charCount = 0;
+                }
+            }
+            
+            return result;
+        }
+
         function getUrlParams() {
             const params = {};
             const searchParams = new URLSearchParams(window.parent.location.search);
@@ -279,7 +297,7 @@
                     programLink.className = 'nav-link';
                     programLink.innerHTML = `
                         <span class="icon">📚</span>
-                        <span class="nav-page-name${isActiveProgram ? ' active' : ''}">${program.name}</span>
+                        <span class="nav-page-name${isActiveProgram ? ' active' : ''}">${formatLongName(program.name)}</span>
                     `;
                     
                     // Создаем кнопку аккордеона для программы
@@ -332,7 +350,7 @@
                             moduleLink.className = 'nav-link';
                             moduleLink.innerHTML = `
                                 <span class="nav-circle blue"></span>
-                                <span class="nav-page-name${isActiveModule ? ' active' : ''}">${module.name}</span>
+                                <span class="nav-page-name${isActiveModule ? ' active' : ''}">${formatLongName(module.name)}</span>
                             `;
                             
                             // Создаем кнопку аккордеона для модуля
@@ -552,6 +570,9 @@
                 noDataEl.innerHTML = 'Нет данных о курсах';
                 document.getElementById('courses-nav').appendChild(noDataEl);
             }
+            document.querySelectorAll('.nav-link').forEach(link => {
+                link.target = '_parent';
+            });
         }
         
         // Функция для раскрытия/скрытия подменю

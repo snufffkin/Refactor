@@ -1,4 +1,4 @@
-# pages/sidebar.py с использованием сервера статических файлов
+# pages/sidebar.py с очищенной структурой
 """
 Компоненты боковой панели с иерархической навигацией через HTML/JS
 """
@@ -8,17 +8,17 @@ import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
 
-import core
-from navigation_data import get_navigation_data, prepare_navigation_json
+from navigation_data import prepare_navigation_json
 from serve_static import serve_json, create_navigation_html
 
 def sidebar_filters(df_full: pd.DataFrame, create_link_fn=None):
     """
-    Отображает HTML/JS компонент для навигации в боковой панели
+    Отображает только HTML/JS компонент для навигации в боковой панели
+    без каких-либо дополнительных фильтров
     
     Args:
         df_full: DataFrame с данными
-        create_link_fn: Функция для создания ссылок с параметрами URL (не используется в этой версии)
+        create_link_fn: Функция для создания ссылок с параметрами URL
     """
     # Путь к JSON файлу
     json_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
@@ -33,14 +33,22 @@ def sidebar_filters(df_full: pd.DataFrame, create_link_fn=None):
         st.session_state["update_navigation"] = False
     
     # Сервируем JSON-файл
-    json_url = serve_json(json_path, key="navigation_json")
+    json_url = serve_json(json_path)
+    
+    # Очищаем заголовок сайдбара (используем пустой заголовок)
+    st.sidebar.markdown("<style>div[data-testid='stSidebarUserContent'] > div:first-child {display: none !important;}</style>", unsafe_allow_html=True)
     
     # Опции CSS для компонента
-    sidebar_height = 600
+    sidebar_height = 800  # Увеличиваем высоту, чтобы использовать все доступное пространство
     css_options = f"""
     <style>
+        /* Скрываем заголовки и прочие элементы в сайдбаре */
+        div[data-testid="stSidebar"] .block-container {{
+            padding-top: 0 !important;
+        }}
+        
         /* Настройки для HTML компонента */
-        iframe {{
+        div[data-testid="stSidebar"] iframe {{
             border: none !important;
             width: 100% !important;
             height: {sidebar_height}px !important;
@@ -52,14 +60,29 @@ def sidebar_filters(df_full: pd.DataFrame, create_link_fn=None):
             overflow-y: hidden !important;
             scrollbar-width: thin !important;
         }}
+        
+        /* Убираем внутренние отступы в сайдбаре */
+        section[data-testid="stSidebar"] > div {{
+            padding-top: 0 !important;
+            padding-right: 0 !important;
+            padding-left: 0 !important;
+            padding-bottom: 0 !important;
+        }}
+        
+        /* Скрываем все стандартные заголовки h3 в сайдбаре */
+        div[data-testid="stSidebar"] h3 {{
+            display: none !important;
+        }}
+        
+        /* Скрываем все прочие элементы в сайдбаре, кроме iframe */
+        div[data-testid="stSidebar"] > div > div > div:not(:first-child) {{
+            display: none !important;
+        }}
     </style>
     """
     
     # Добавляем CSS опции
     st.sidebar.markdown(css_options, unsafe_allow_html=True)
-    
-    # Отображаем компонент
-    st.sidebar.markdown("### Навигация")
     
     # Создаем HTML для навигации с URL к JSON
     html_content = create_navigation_html(json_url, sidebar_height)
@@ -67,54 +90,9 @@ def sidebar_filters(df_full: pd.DataFrame, create_link_fn=None):
     # Отображаем компонент
     components.html(html_content, height=sidebar_height, scrolling=True)
     
-    # Добавляем кнопку для обновления навигации
+    # Неявно добавляем крошечную кнопку для обновления навигации (скрытую в нижней части сайдбара)
     with st.sidebar:
-        if st.button("🔄 Обновить навигацию"):
+        # Добавляем кнопку обновления, но делаем её очень маленькой и незаметной
+        if st.button("↻", help="Обновить навигацию", key="tiny_update_button"):
             st.session_state["update_navigation"] = True
             st.rerun()
-    
-    # Добавляем расширенные фильтры внизу
-    st.sidebar.markdown("### Расширенные фильтры")
-    
-    # Фильтр по статусу
-    if "status" in df_full.columns:
-        status_options = ["Все"] + sorted(df_full["status"].dropna().unique())
-        st.sidebar.multiselect(
-            "Статус",
-            options=status_options[1:],  # Убираем "Все" из опций
-            default=st.session_state.get("filter_status", None),
-            key="filter_status"
-        )
-    
-    # Фильтр по типу карточек
-    if "card_type" in df_full.columns:
-        card_type_options = ["Все"] + sorted(df_full["card_type"].dropna().unique())
-        st.sidebar.multiselect(
-            "Тип карточки",
-            options=card_type_options[1:],  # Убираем "Все" из опций
-            default=st.session_state.get("filter_card_type", None),
-            key="filter_card_type"
-        )
-    
-    # Фильтр по риску
-    st.sidebar.slider(
-        "Уровень риска",
-        min_value=0.0,
-        max_value=1.0,
-        value=st.session_state.get("filter_risk", (0.0, 1.0)),
-        step=0.1,
-        key="filter_risk"
-    )
-    
-    # Добавляем информацию о проекте
-    st.sidebar.markdown("---")
-    st.sidebar.info(
-        """
-        **Course Quality Dashboard**
-        
-        Этот инструмент помогает анализировать качество учебных материалов 
-        и выявлять проблемные места на основе метрик успешности учащихся.
-        
-        Версия 3.0
-        """
-    )
