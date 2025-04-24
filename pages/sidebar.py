@@ -7,14 +7,10 @@ import os
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
-import base64
+import base64  # используется для кодирования при необходимости
 
-from navigation_data import prepare_navigation_json
-from serve_static import serve_json, create_navigation_html
-
-import streamlit as st
-from navigation_component import navigation_menu
 from navigation_data import get_navigation_data
+from navbar_component import navigation_menu
 
 def sidebar_filters(df_full, create_link_fn=None):
     """

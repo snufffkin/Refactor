@@ -1,14 +1,14 @@
 import pandas as pd
 from sqlalchemy import create_engine, text
 
-DB_PATH = "sqlite:///course_quality.db"
+DB_PATH = "postgresql:///course_quality"
 XLSX    = "course_metrics.xlsx"          # <‑‑  имя вашего файла
 
 engine = create_engine(DB_PATH, future=True)
 
 # --- 1. STRUCTURE -----------------------------------------------------------
 structure = (
-    pd.read_excel(XLSX, sheet_name="cards_mv")  # лист 1
+    pd.read_excel(XLSX, sheet_name="cards_mv")  # лист 1
       .rename(columns={
           "Программа":"program", "Модуль":"module",
           "Порядок модуля в программе":"module_order",
@@ -21,7 +21,7 @@ structure.to_sql("cards_structure", engine, if_exists="replace", index=False)
 
 # --- 2. METRICS -------------------------------------------------------------
 metrics = (
-    pd.read_excel(XLSX, sheet_name="card_status")   # лист 2
+    pd.read_excel(XLSX, sheet_name="card_status")   # лист 2
       .rename(columns={
           "ID карточки":"card_id",
           "Всего попытавшихся":"total_attempts",
@@ -49,15 +49,19 @@ with engine.begin() as conn:
 
 # --- 4. VIEW ---------------------------------------------------------------
 with engine.begin() as conn:
-    conn.exec_driver_sql("DROP VIEW IF EXISTS cards_mv;")
+    conn.exec_driver_sql("DROP VIEW IF EXISTS cards_mv;" )
     conn.exec_driver_sql("""
-        CREATE VIEW cards_mv AS
-        SELECT s.*, m.*,
-               COALESCE(st.status,'new')   AS status,
-               st.updated_at
+        CREATE OR REPLACE VIEW cards_mv AS
+        SELECT
+            s.program, s.module, s.module_order, s.lesson, s.lesson_order,
+            s.gz, s.gz_id, s.card_id, s.card_type, s.card_url,
+            m.total_attempts, m.attempted_share, m.success_rate,
+            m.first_try_success_rate, m.complaint_rate, m.complaints_total,
+            m.discrimination_avg, m.success_attempts_rate,
+            COALESCE(st.status,'new') AS status, st.updated_at
         FROM cards_structure s
-        JOIN cards_metrics   m USING(card_id)
+        JOIN cards_metrics m USING(card_id)
         LEFT JOIN card_status st USING(card_id);
     """)
 
-print("✓ course_quality.db создан и содержит view cards_mv")
+print("✓ PostgreSQL database course_quality настроена и содержит view cards_mv")

@@ -5,8 +5,10 @@ import streamlit as st
 # Определяем текущий каталог
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
-# Путь к директории сборки фронтенда
-build_path = os.path.join(current_dir, "frontend", "build")
+# Путь к директории сборки фронтенда (TypeScript-компонент)
+build_path = os.path.abspath(os.path.join(
+    current_dir, "..", "..", "component-template", "streamlit-navbar", "streamlit_navbar", "frontend", "build"
+))
 
 # Определяем режим работы
 _RELEASE = os.path.exists(build_path)  # Проверяем существует ли директория сборки

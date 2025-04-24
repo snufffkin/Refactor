@@ -11,7 +11,7 @@ import json
 # Добавляем путь к родительской директории для импорта модулей
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core import get_engine, load_data
+from core import get_engine, load_data, risk_score
 from navigation_data import prepare_navigation_json
 
 def update_navigation():
@@ -30,6 +30,8 @@ def update_navigation():
     
     # Загружаем данные
     data = load_data(engine)
+    # Вычисляем риск для каждой карточки
+    data["risk"] = data.apply(risk_score, axis=1)
     
     # Создаем JSON-файл с навигацией
     navigation = prepare_navigation_json(data, json_path)

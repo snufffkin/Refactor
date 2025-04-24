@@ -17,7 +17,7 @@ from core_config import get_config
 # ---------------- DB ------------------------------------------------------- #
 
 def get_engine():
-    dsn = os.getenv("DB_DSN", "sqlite:///course_quality.db")
+    dsn = os.getenv("DB_DSN", "postgresql:///course_quality")
     return create_engine(dsn, future=True)
 
 
