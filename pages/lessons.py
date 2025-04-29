@@ -204,49 +204,190 @@ def page_lessons(df: pd.DataFrame):
         # Добавляем разделитель
         st.markdown("---")
         _page_gz_inline(df)
-
-    # --- Отзывы учителей --------------------------------------------------------
+    # Улучшенный блок для отображения отзывов учителей в 4 колонки
     st.subheader("📝 Отзывы учителей")
+
     # Загружаем отзывы из БД
     engine = core.get_engine()
     query = f"SELECT * FROM teacher_reviews WHERE program = '{program_filter}' AND module = '{module_filter}' AND lesson = '{lesson_filter}'"
     df_reviews = pd.read_sql(query, engine)
+
     if df_reviews.empty:
         st.info("Нет отзывов учителей для этого урока")
     else:
         row = df_reviews.iloc[0]
-        # Основная статистика по отзывам
-        stats = {
-            "Общая оценка": row["overall_stat"],
-            "Интересность": row["interest_stat"],
-            "Презентация": row["presentation_rate"],
-            "Рабочая тетрадь": row["workbook_rate"],
-            "Доп. материалы": row["addmaterial_rate"],
-            "Сложность": row["complexity_stat"]
-        }
-        stats_df = pd.DataFrame({"Метрика": list(stats.keys()), "Значение": list(stats.values())})
-        st.table(stats_df)
-        # Текстовые отзывы
-        st.markdown("**Презентация – что понравилось**")
-        st.write(row["presentation_like"])
-        st.markdown("**Презентация – что не понравилось**")
-        st.write(row["presentation_dislike"])
-        st.markdown("**Рабочая тетрадь – что понравилось**")
-        st.write(row["workbook_like"])
-        st.markdown("**Рабочая тетрадь – что не понравилось**")
-        st.write(row["workbook_dislike"])
-        st.markdown("**Доп. материалы – что понравилось**")
-        st.write(row["addmaterial_like"])
-        st.markdown("**Доп. материалы – что не понравились**")
-        st.write(row["addmaterial_dislike"])
-        st.markdown("**Интересность – что понравилось**")
-        st.write(row["interest_like"])
-        st.markdown("**Интересность – что не понравилось**")
-        st.write(row["interest_dislike"])
-        st.markdown("**Сложность – как упростить**")
-        st.write(row["complexity_to_simplify"])
-        st.markdown("**Сложность – как усложнить**")
-        st.write(row["complexity_to_complicate"])
+        
+        # Создаем блок с основными метриками в виде нативных компонентов Streamlit
+        st.markdown("### Основные метрики")
+        
+        # Отображаем основные метрики в три колонки
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            # Просто отображаем значение без дельты
+            st.metric("Общая оценка", f"{row['overall_stat']:.1f}")
+        
+        with col2:
+            st.metric("Интересность", f"{row['interest_stat']:.1f}")
+        
+        with col3:
+            # Для сложности: показываем отклонение от оптимальной сложности (3.0)
+            delta = 3.0 - row["complexity_stat"]
+            # Отклонение от идеальной сложности должно быть отрицательной дельтой, если слишком сложно,
+            # и положительной, если слишком просто
+            delta_text = f"{delta:.1f}"
+            # Если сложность близка к оптимальной (2.5-3.5), не показываем дельту
+            if 2.5 <= row["complexity_stat"] <= 3.5:
+                st.metric("Сложность", f"{row['complexity_stat']:.1f}")
+            else:
+                st.metric("Сложность", f"{row['complexity_stat']:.1f}", delta_text, delta_color="inverse")
+        
+        # Вторая строка метрик
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("Презентация", f"{row['presentation_rate']:.1f}")
+        
+        with col2:
+            st.metric("Рабочая тетрадь", f"{row['workbook_rate']:.1f}")
+        
+        with col3:
+            st.metric("Доп. материалы", f"{row['addmaterial_rate']:.1f}")
+        
+        # Добавляем радарную диаграмму для общего обзора метрик
+        st.markdown("### Сравнение метрик")
+        
+        # Создаем радарную диаграмму для метрик
+        radar_data = pd.DataFrame({
+            'Метрика': ['Общая оценка', 'Интересность', 'Рабочая тетрадь', 'Презентация', 'Доп. материалы'],
+            'Значение': [row["overall_stat"], row["interest_stat"], row["workbook_rate"], 
+                        row["presentation_rate"], row["addmaterial_rate"]]
+        })
+        
+        # Отображаем радарную диаграмму
+        fig = go.Figure()
+        fig.add_trace(go.Scatterpolar(
+            r=radar_data['Значение'],
+            theta=radar_data['Метрика'],
+            fill='toself',
+            name='Оценки',
+            line_color='rgb(77, 166, 255)'
+        ))
+        
+        fig.update_layout(
+            polar=dict(
+                radialaxis=dict(
+                    visible=True,
+                    range=[0, 5]
+                )
+            ),
+            title="Радар оценок материалов",
+            height=400
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Функция для создания карточки отзыва
+        def create_review_card(text, is_positive=True):
+            bg_color = "rgba(47, 120, 80, 0.1)" if is_positive else "rgba(180, 60, 60, 0.1)"
+            border_color = "rgba(47, 120, 80, 0.5)" if is_positive else "rgba(180, 60, 60, 0.5)"
+            
+            return f"""
+            <div style="
+                background-color: {bg_color};
+                border: 1px solid {border_color};
+                border-radius: 4px;
+                padding: 8px;
+                margin-bottom: 8px;
+                font-size: 0.9em;
+            ">
+                {text}
+            </div>
+            """
+        
+        # Функция для отображения отзывов в 2 колонки внутри основной колонки
+        def display_reviews_in_subcols(reviews, is_positive=True):
+            if pd.isna(reviews) or reviews == '':
+                st.info("Нет отзывов")
+                return
+            
+            # Разделяем отзывы по переносу строки и убираем пустые строки
+            items = [item.strip() for item in reviews.split('\n') if item.strip()]
+            if not items:
+                st.info("Нет отзывов")
+                return
+            
+            # Разделяем отзывы на две подколонки
+            subcol1, subcol2 = st.columns(2)
+            
+            # Распределяем отзывы поровну между подколонками
+            half = len(items) // 2 + (1 if len(items) % 2 != 0 else 0)
+            
+            # Первая подколонка
+            with subcol1:
+                for i in range(half):
+                    st.markdown(create_review_card(items[i], is_positive), unsafe_allow_html=True)
+            
+            # Вторая подколонка
+            with subcol2:
+                for i in range(half, len(items)):
+                    st.markdown(create_review_card(items[i], is_positive), unsafe_allow_html=True)
+        
+        # Отображаем текстовые отзывы в виде вкладок
+        st.markdown("### Детальные отзывы учителей")
+        
+        # Инициализация вкладок
+        tabs = st.tabs(["Презентация", "Рабочая тетрадь", "Доп. материалы", "Интересность", "Сложность"])
+        
+        # Отзывы о презентации
+        with tabs[0]:
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("Что понравилось")
+                display_reviews_in_subcols(row["presentation_like"], is_positive=True)
+            with col2:
+                st.subheader("Что не понравилось")
+                display_reviews_in_subcols(row["presentation_dislike"], is_positive=False)
+
+        # Отзывы о рабочей тетради
+        with tabs[1]:
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("Что понравилось")
+                display_reviews_in_subcols(row["workbook_like"], is_positive=True)
+            with col2:
+                st.subheader("Что не понравилось")
+                display_reviews_in_subcols(row["workbook_dislike"], is_positive=False)
+
+        # Отзывы о дополнительных материалах
+        with tabs[2]:
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("Что понравилось")
+                display_reviews_in_subcols(row["addmaterial_like"], is_positive=True)
+            with col2:
+                st.subheader("Что не понравилось")
+                display_reviews_in_subcols(row["addmaterial_dislike"], is_positive=False)
+
+        # Отзывы об интересности
+        with tabs[3]:
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("Что понравилось")
+                display_reviews_in_subcols(row["interest_like"], is_positive=True)
+            with col2:
+                st.subheader("Что не понравилось")
+                display_reviews_in_subcols(row["interest_dislike"], is_positive=False)
+
+        # Отзывы о сложности
+        with tabs[4]:
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("Как упростить")
+                display_reviews_in_subcols(row["complexity_to_simplify"], is_positive=False)
+            with col2:
+                st.subheader("Как усложнить")
+                display_reviews_in_subcols(row["complexity_to_complicate"], is_positive=True)
 
 # Встроенная версия страницы уроков для использования в других страницах
 def _page_lessons_inline(df: pd.DataFrame):
