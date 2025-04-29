@@ -101,8 +101,11 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
     
     with tabs[1]:
         # График зависимости успешности и жалоб
+        # Заменяем NaN в total_attempts на 0 для параметра size
+        scatter_df = df_gz.copy()
+        scatter_df['total_attempts'] = scatter_df['total_attempts'].fillna(0)
         fig = px.scatter(
-            df_gz,
+            scatter_df,
             x="success_rate",
             y="complaint_rate",
             color="risk",
@@ -416,7 +419,8 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
     display_df["Успех с 1-й"] = cards_df["first_try_success_rate"].apply(lambda x: f"{x:.1%}")
     display_df["Жалобы"] = cards_df["complaint_rate"].apply(lambda x: f"{x:.1%}")
     display_df["Дискр."] = cards_df["discrimination_avg"].apply(lambda x: f"{x:.2f}")
-    display_df["Попытки"] = cards_df["total_attempts"].apply(lambda x: f"{int(x)}")
+    # Заменяем NaN на 0 и форматируем как целое число в строку
+    display_df["Попытки"] = cards_df["total_attempts"].fillna(0).astype(int).astype(str)
     display_df["Риск"] = cards_df["risk"].apply(lambda x: f"{x:.2f}")
     
     # Добавляем категорию подлости

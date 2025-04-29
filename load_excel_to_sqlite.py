@@ -2,39 +2,41 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 
 DB_PATH = "postgresql:///course_quality"
-XLSX    = "course_metrics.xlsx"          # <‑‑  имя вашего файла
+XLSX    = "informatics_structure.xlsx"   # имя новой выгрузки с теоретическими карточками
 
 engine = create_engine(DB_PATH, future=True)
 
 # --- 1. STRUCTURE -----------------------------------------------------------
-structure = (
-    pd.read_excel(XLSX, sheet_name="cards_mv")  # лист 1
-      .rename(columns={
-          "Программа":"program", "Модуль":"module",
-          "Порядок модуля в программе":"module_order",
-          "Урок":"lesson", "Порядок урока в модуле":"lesson_order",
-          "ГЗ":"gz", "ID ГЗ":"gz_id", "ID карточки":"card_id",
-          "Тип карточки":"card_type", "Ссылка на карточку":"card_url"
-      })
-)
-structure.to_sql("cards_structure", engine, if_exists="replace", index=False)
+# Читаем первый (и единственный) лист с новой структурой
+structure = pd.read_excel(XLSX, sheet_name=0)
+# Оставляем только нужные колонки (игнорируем лишний card_order)
+structure = structure[[
+    'program','module','module_order','lesson','lesson_order',
+    'gz','gz_id','card_id','card_type','card_url'
+]]
+# Создаю таблицу структуры, если не существует, и очищаю её без удаления зависимостей
+with engine.begin() as conn:
+    conn.exec_driver_sql("""
+        CREATE TABLE IF NOT EXISTS cards_structure(
+            program TEXT,
+            module TEXT,
+            module_order INTEGER,
+            lesson TEXT,
+            lesson_order INTEGER,
+            gz TEXT,
+            gz_id INTEGER,
+            card_id INTEGER PRIMARY KEY,
+            card_type TEXT,
+            card_url TEXT
+        );
+    """
+    )
+    conn.exec_driver_sql("TRUNCATE TABLE cards_structure;")
+# Вставляю новые данные
+structure.to_sql("cards_structure", engine, if_exists="append", index=False)
 
-# --- 2. METRICS -------------------------------------------------------------
-metrics = (
-    pd.read_excel(XLSX, sheet_name="card_status")   # лист 2
-      .rename(columns={
-          "ID карточки":"card_id",
-          "Всего попытавшихся":"total_attempts",
-          "Доля попытавшихся":"attempted_share",
-          "Доля успешно решивших от попытавшихся":"success_rate",
-          "Доля успешных с первой попытки":"first_try_success_rate",
-          "Доля жалоб":"complaint_rate",
-          "Общее количество жалоб":"complaints_total",
-          "Средняя дискриминативность":"discrimination_avg",
-          "Доля успешных попыток":"success_attempts_rate",
-      })
-)
-metrics.to_sql("cards_metrics", engine, if_exists="replace", index=False)
+# --- 2. METRICS (не изменяем) --------------------------------------------------
+# Метрики остаются в таблице cards_metrics без перезаписи, новые карточки получат NULL
 
 # --- 3. STATUS (пустая таблица) --------------------------------------------
 with engine.begin() as conn:
@@ -60,7 +62,7 @@ with engine.begin() as conn:
             m.discrimination_avg, m.success_attempts_rate,
             COALESCE(st.status,'new') AS status, st.updated_at
         FROM cards_structure s
-        JOIN cards_metrics m USING(card_id)
+        LEFT JOIN cards_metrics m USING(card_id)
         LEFT JOIN card_status st USING(card_id);
     """)
 

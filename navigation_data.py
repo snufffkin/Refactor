@@ -121,11 +121,18 @@ def prepare_navigation_json(df, output_path="components/navigation_data.json"):
                     # Для каждой карточки
                     for _, card in cards_df.iterrows():
                         card_id = int(card["card_id"])
+                        raw_risk = card["risk"]
+                        if pd.isna(raw_risk):
+                            risk_json = None
+                            risk_str = "N/A"
+                        else:
+                            risk_json = float(raw_risk)
+                            risk_str = f"{risk_json:.2f}"
                         # Создаем структуру карточки
                         card_data = {
                             "id": str(card_id),
-                            "name": f"ID: {card_id} - Риск: {card['risk']:.2f}",
-                            "risk": float(card["risk"]),
+                            "name": f"ID: {card_id} - Риск: {risk_str}",
+                            "risk": risk_json,
                             "url": create_link("cards", program=program_name, module=module_name, 
                                               lesson=lesson_name, gz=group_name, card_id=card_id)
                         }

@@ -204,7 +204,50 @@ def page_lessons(df: pd.DataFrame):
         # Добавляем разделитель
         st.markdown("---")
         _page_gz_inline(df)
-    
+
+    # --- Отзывы учителей --------------------------------------------------------
+    st.subheader("📝 Отзывы учителей")
+    # Загружаем отзывы из БД
+    engine = core.get_engine()
+    query = f"SELECT * FROM teacher_reviews WHERE program = '{program_filter}' AND module = '{module_filter}' AND lesson = '{lesson_filter}'"
+    df_reviews = pd.read_sql(query, engine)
+    if df_reviews.empty:
+        st.info("Нет отзывов учителей для этого урока")
+    else:
+        row = df_reviews.iloc[0]
+        # Основная статистика по отзывам
+        stats = {
+            "Общая оценка": row["overall_stat"],
+            "Интересность": row["interest_stat"],
+            "Презентация": row["presentation_rate"],
+            "Рабочая тетрадь": row["workbook_rate"],
+            "Доп. материалы": row["addmaterial_rate"],
+            "Сложность": row["complexity_stat"]
+        }
+        stats_df = pd.DataFrame({"Метрика": list(stats.keys()), "Значение": list(stats.values())})
+        st.table(stats_df)
+        # Текстовые отзывы
+        st.markdown("**Презентация – что понравилось**")
+        st.write(row["presentation_like"])
+        st.markdown("**Презентация – что не понравилось**")
+        st.write(row["presentation_dislike"])
+        st.markdown("**Рабочая тетрадь – что понравилось**")
+        st.write(row["workbook_like"])
+        st.markdown("**Рабочая тетрадь – что не понравилось**")
+        st.write(row["workbook_dislike"])
+        st.markdown("**Доп. материалы – что понравилось**")
+        st.write(row["addmaterial_like"])
+        st.markdown("**Доп. материалы – что не понравились**")
+        st.write(row["addmaterial_dislike"])
+        st.markdown("**Интересность – что понравилось**")
+        st.write(row["interest_like"])
+        st.markdown("**Интересность – что не понравилось**")
+        st.write(row["interest_dislike"])
+        st.markdown("**Сложность – как упростить**")
+        st.write(row["complexity_to_simplify"])
+        st.markdown("**Сложность – как усложнить**")
+        st.write(row["complexity_to_complicate"])
+
 # Встроенная версия страницы уроков для использования в других страницах
 def _page_lessons_inline(df: pd.DataFrame):
     """Встроенная версия страницы уроков для отображения на странице модуля"""

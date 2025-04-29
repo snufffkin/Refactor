@@ -1,6 +1,15 @@
 import "./index.css"
 import { Streamlit, RenderData } from "streamlit-component-lib"
 
+// Добавляю объявление свойства lastClickedMenu для объекта Window
+declare global {
+  interface Window {
+    lastClickedMenu: string | null;
+  }
+}
+
+window.lastClickedMenu = null;
+
 // Создаем контейнер для боковой панели навигации
 const sidebar = document.body.appendChild(document.createElement("div"))
 sidebar.className = "sidebar-menu"
@@ -81,30 +90,52 @@ function getUrlParams(): Record<string, string> {
 }
 
 /**
- * Универсальная функция раскрытия/сворачивания подменю:
- * ищет следующий UL-сосед от аккордеон-элемента.
+ * Универсальная функция раскрытия/сворачивания подменю
+ * с использованием ID элементов
  */
-function toggleSubmenu(accordionEl: HTMLElement): void {
-  const submenu = accordionEl.parentElement?.nextElementSibling as HTMLElement | null;
-  if (!submenu || submenu.tagName !== "UL") return;
-  const icon = accordionEl.querySelector(".nav-accordion-icon") as HTMLElement | null;
-  const isExpanded = submenu.classList.contains("expanded");
+function toggleSubmenu(submenuId: string): void {
+  console.log("Toggle submenu called for:", submenuId);
+  console.log("Last clicked menu was:", window.lastClickedMenu);
+  window.lastClickedMenu = submenuId;
+  
+  const submenu = document.getElementById(submenuId);
+  if (!submenu) {
+    console.error("Submenu not found:", submenuId);
+    return;
+  }
+  
+  console.log("Submenu found:", submenu);
+  
+  // Проверяем наличие класса непосредственно в списке классов
+  const classList = Array.from(submenu.classList);
+  const isExpanded = classList.includes("expanded");
+  console.log("Current expanded state:", isExpanded, "classList:", classList);
+  
   if (isExpanded) {
+    console.log("Removing expanded class");
     submenu.classList.remove("expanded");
-    if (icon) {
-      icon.classList.replace("close", "open");
-      icon.textContent = "+";
+    const accordion = submenu.previousElementSibling?.querySelector('.nav-accordion');
+    const accordionIcon = accordion?.querySelector('.nav-accordion-icon') as HTMLElement | null;
+    if (accordionIcon) {
+      accordionIcon.classList.replace("close", "open");
+      accordionIcon.textContent = "+";
     }
   } else {
+    console.log("Adding expanded class");
     submenu.classList.add("expanded");
-    if (icon) {
-      icon.classList.replace("open", "close");
-      icon.textContent = "✕";
+    const accordion = submenu.previousElementSibling?.querySelector('.nav-accordion');
+    const accordionIcon = accordion?.querySelector('.nav-accordion-icon') as HTMLElement | null;
+    if (accordionIcon) {
+      accordionIcon.classList.replace("open", "close");
+      accordionIcon.textContent = "✕";
     }
   }
-  Streamlit.setFrameHeight();
+  
+  // Обновляем высоту фрейма после небольшой задержки
+  setTimeout(() => {
+    Streamlit.setFrameHeight();
+  }, 100);
 }
-
 /**
  * Генерирует навигацию из объекта данных
  */
@@ -168,12 +199,15 @@ function generateNavigation(data: any): void {
       `
       progCont.appendChild(progLink)
 
+      // Создаем уникальный ID для подменю
+      const programSubmenuId = `program-${progKey}-submenu`
+
       const progAccordion = document.createElement("div")
       progAccordion.className = "nav-accordion"
       progAccordion.onclick = function(e) {
         e.preventDefault()
         e.stopPropagation()
-        toggleSubmenu(progAccordion)
+        toggleSubmenu(programSubmenuId)
       }
       const progIcon = document.createElement("span")
       progIcon.className = `nav-accordion-icon ${program.modules && program.modules.length > 0 ? "open" : ""}`
@@ -185,7 +219,7 @@ function generateNavigation(data: any): void {
 
       const modulesUl = document.createElement("ul")
       modulesUl.className = "nav-list"
-      modulesUl.id = `program-${progKey}-submenu`
+      modulesUl.id = programSubmenuId  // Используем созданный ID
       if (isActiveProg) {
         modulesUl.classList.add("expanded")
         progIcon.classList.replace("open", "close")
@@ -211,12 +245,15 @@ function generateNavigation(data: any): void {
           `
           modCont.appendChild(modLink)
 
+          // Создаем уникальный ID для подменю модуля
+          const moduleSubmenuId = `module-${progKey}-${modKey}-submenu`
+
           const modAccordion = document.createElement("div")
           modAccordion.className = "nav-accordion"
           modAccordion.onclick = function(e) {
             e.preventDefault()
             e.stopPropagation()
-            toggleSubmenu(modAccordion)
+            toggleSubmenu(moduleSubmenuId)
           }
           const modIcon = document.createElement("span")
           modIcon.className = `nav-accordion-icon ${mod.lessons && mod.lessons.length > 0 ? "open" : ""}`
@@ -228,7 +265,7 @@ function generateNavigation(data: any): void {
 
           const lessonsUl = document.createElement("ul")
           lessonsUl.className = "nav-list"
-          lessonsUl.id = `module-${progKey}-${modKey}-submenu`
+          lessonsUl.id = moduleSubmenuId  // Используем созданный ID
           if (isActiveMod) {
             lessonsUl.classList.add("expanded")
             modIcon.classList.replace("open", "close")
@@ -254,12 +291,15 @@ function generateNavigation(data: any): void {
               `
               lesCont.appendChild(lesLink)
 
+              // Создаем уникальный ID для подменю урока
+              const lessonSubmenuId = `lesson-${progKey}-${modKey}-${lesKey}-submenu`
+
               const lesAccordion = document.createElement("div")
               lesAccordion.className = "nav-accordion"
               lesAccordion.onclick = function(e) {
                 e.preventDefault()
                 e.stopPropagation()
-                toggleSubmenu(lesAccordion)
+                toggleSubmenu(lessonSubmenuId)
               }
               const lesIcon = document.createElement("span")
               lesIcon.className = `nav-accordion-icon ${les.groups && les.groups.length > 0 ? "open" : ""}`
@@ -271,7 +311,7 @@ function generateNavigation(data: any): void {
 
               const groupsUl = document.createElement("ul")
               groupsUl.className = "nav-list"
-              groupsUl.id = `lesson-${progKey}-${modKey}-${lesKey}-submenu`
+              groupsUl.id = lessonSubmenuId  // Используем созданный ID
               if (isActiveLes) {
                 groupsUl.classList.add("expanded")
                 lesIcon.classList.replace("open", "close")
@@ -297,12 +337,15 @@ function generateNavigation(data: any): void {
                   `
                   grpCont.appendChild(grpLink)
 
+                  // Создаем уникальный ID для подменю группы
+                  const groupSubmenuId = `group-${progKey}-${modKey}-${lesKey}-${grpKey}-submenu`
+
                   const grpAccordion = document.createElement("div")
                   grpAccordion.className = "nav-accordion"
                   grpAccordion.onclick = function(e) {
                     e.preventDefault()
                     e.stopPropagation()
-                    toggleSubmenu(grpAccordion)
+                    toggleSubmenu(groupSubmenuId)
                   }
                   const grpIcon = document.createElement("span")
                   grpIcon.className = `nav-accordion-icon ${grp.cards && grp.cards.length > 0 ? "open" : ""}`
@@ -314,7 +357,7 @@ function generateNavigation(data: any): void {
 
                   const cardsUl = document.createElement("ul")
                   cardsUl.className = "nav-list"
-                  cardsUl.id = `group-${progKey}-${modKey}-${lesKey}-${grpKey}-submenu`
+                  cardsUl.id = groupSubmenuId  // Используем созданный ID
                   if (isActiveGrp) {
                     cardsUl.classList.add("expanded")
                     grpIcon.classList.replace("open", "close")

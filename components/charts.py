@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+import core
 
 
 # Добавьте эту новую вспомогательную функцию в начало файла charts.py
@@ -619,6 +620,7 @@ def display_trickiness_success_chart(df, limit=50, title="Зависимость
         limit: Максимальное количество элементов для отображения
         title: Заголовок графика
     """
+    import core
     # Проверяем наличие колонки trickiness_level
     if "trickiness_level" not in df.columns:
         df["trickiness_level"] = df.apply(core.get_trickiness_level, axis=1)

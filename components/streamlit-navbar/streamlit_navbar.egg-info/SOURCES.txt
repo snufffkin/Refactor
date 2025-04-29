@@ -14,6 +14,6 @@ streamlit_navbar/frontend/build/bootstrap.min.css
 streamlit_navbar/frontend/build/index.html
 streamlit_navbar/frontend/build/static/css/main.27e84d36.css
 streamlit_navbar/frontend/build/static/css/main.27e84d36.css.map
-streamlit_navbar/frontend/build/static/js/main.fa908104.js
-streamlit_navbar/frontend/build/static/js/main.fa908104.js.LICENSE.txt
-streamlit_navbar/frontend/build/static/js/main.fa908104.js.map
+streamlit_navbar/frontend/build/static/js/main.5100a5bd.js
+streamlit_navbar/frontend/build/static/js/main.5100a5bd.js.LICENSE.txt
+streamlit_navbar/frontend/build/static/js/main.5100a5bd.js.map
