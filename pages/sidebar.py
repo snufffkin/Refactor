@@ -55,5 +55,5 @@ def sidebar_filters(df_full, create_link_fn=None):
                 for key, value in params.items():
                     new_params[key] = value[0] if value else ""
                 
-                # Обновляем параметры URL
+                # Обновляем параметры URL (сохраняется session_state)
                 st.query_params.update(**new_params)

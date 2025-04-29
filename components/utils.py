@@ -49,28 +49,25 @@ def create_hierarchical_header(levels, values, emoji_map=None):
     
     with nav_col2:
         for i, value in enumerate(values):
-            if value and i < len(levels):  # Проверяем, что значение существует и уровень соответствует
-                # Определяем, на какую страницу вести при клике
+            if value and i < len(levels):
                 level = levels[i]
-                target_page = level + "s"  # Например, program -> programs
+                # Вычисляем целевую страницу
+                target_page = level + "s"
                 if level == "gz":
-                    target_page = "gz"  # Особый случай для ГЗ
-                
-                # Собираем параметры для URL
+                    target_page = "gz"
+                # Собираем параметры для навигации
                 params = {}
                 for j, l in enumerate(levels[:i+1]):
                     if values[j]:
                         params[l] = values[j]
-                
-                # Создаем ссылку
-                url = "?" + "&".join([f"{k}={ul.quote_plus(str(v))}" for k, v in params.items()]) + f"&page={target_page}"
-                
-                st.markdown(
-                    f'<a href="{url}" target="_self" '
-                    'style="text-decoration:none;color:#4da6ff;font-weight:600;">'
-                    f'{value}</a>',
-                    unsafe_allow_html=True,
-                )
+                # Кнопка навигации
+                key = f"nav_header_{level}_{i}"
+                if st.button(f"{value}", key=key):
+                    # Устанавливаем query params и перезапускаем
+                    params_for_url = {"page": target_page}
+                    params_for_url.update(params)
+                    st.query_params = params_for_url
+                    st.rerun()
             else:
                 st.markdown(f"**{value or '—'}**")
     
@@ -124,42 +121,31 @@ def display_clickable_items(df, column, level, metrics=None):
         target_page = "cards"
     
     for i, (_, row) in enumerate(sorted_df.iterrows()):
-        # Определяем, в какую колонку добавить элемент
         current_col = col1 if i < half else col2
-        
         with current_col:
-            c1, c2 = st.columns([4, 3])
-            with c1:
-                # Создаем параметры URL
-                url_params = current_filters.copy()
-                url_params[level] = row[column]
-                
-                # Создаем URL
-                url = "?" + "&".join([f"{k}={ul.quote_plus(str(v))}" for k, v in url_params.items()]) + f"&page={target_page}"
-                
-                # Создаем ссылку
-                st.markdown(
-                    f'<a href="{url}" target="_self" '
-                    'style="text-decoration:none;color:#4da6ff;font-weight:600;">'
-                    f'{row[column]}</a>',
-                    unsafe_allow_html=True,
-                )
-            with c2:
-                if metrics:
-                    # Создаем строку с метриками
-                    metrics_str = []
-                    if "cards" in metrics:
-                        metrics_str.append(f"Cards: {row.cards}")
-                    if "risk" in metrics:
-                        metrics_str.append(f"Risk: {row.risk:.2f}")
-                    if "success" in metrics:
-                        metrics_str.append(f"Success: {row.success:.1%}")
-                    if "complaints" in metrics:
-                        metrics_str.append(f"Compl: {row.complaints:.1%}")
-                    
-                    st.markdown(f"{' | '.join(metrics_str)}")
-                else:
-                    st.markdown(f"Cards: {row.cards}")
+            # Параметры для navigation
+            url_params = current_filters.copy()
+            url_params[level] = row[column]
+            # Суффикс для ключа по metrics, чтобы ключи были уникальны при разных вызовах
+            metrics_suffix = "-".join(metrics) if metrics else ""
+            key = f"nav_item_{level}_{metrics_suffix}_{i}"
+            if st.button(f"{row[column]}", key=key):
+                params_for_url = {"page": target_page}
+                params_for_url.update(url_params)
+                st.query_params = params_for_url
+                st.rerun()
+            # Показ метрик рядом с кнопкой
+            if metrics:
+                metrics_str = []
+                if "cards" in metrics:
+                    metrics_str.append(f"Cards: {row.cards}")
+                if "risk" in metrics:
+                    metrics_str.append(f"Risk: {row.risk:.2f}")
+                if "success" in metrics:
+                    metrics_str.append(f"Success: {row.success:.1%}")
+                if "complaints" in metrics:
+                    metrics_str.append(f"Compl: {row.complaints:.1%}")
+                st.markdown(" | ".join(metrics_str))
 
 def add_gz_links(df, gz_filter):
     """

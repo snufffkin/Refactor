@@ -9,9 +9,14 @@ import urllib.parse as ul
 import streamlit as st
 import os
 import shutil
+import auth
+
+auth.init_auth()
 
 import core
 import pages
+import pages.my_tasks
+import pages.methodist_admin
 
 # Настройка страницы
 st.set_page_config(
@@ -125,17 +130,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Обрабатываем сообщения из iframe навигации для перехода
-st.markdown("""
-<script>
-window.addEventListener('message', event => {
-    if (event.data && event.data.type === 'navigate' && event.data.url) {
-        window.location.href = event.data.url;
-    }
-});
-</script>
-""", unsafe_allow_html=True)
-
 # Кэшируем только данные, но не engine
 @st.cache_data(ttl=3600)  # Уменьшаем время кэширования до 1 часа
 def load_cached_data(_engine):
@@ -175,6 +169,12 @@ def set_filters_from_params(params):
 
 # Создаем engine вне кэширования
 engine = core.get_engine()
+
+# Проверяем активность сессии и авторизацию пользователя
+if not auth.check_authentication():
+    auth.login_page(engine)
+    st.stop()
+
 data = load_cached_data(engine)
 
 # ---------------------- Обработка URL-параметров ---------------------- #
@@ -197,6 +197,10 @@ elif current_page == "cards":
     current_page = "Карточки"
 elif current_page == "admin":
     current_page = "⚙️ Настройки"
+elif current_page == "my_tasks":
+    current_page = "Мои задачи"
+elif current_page == "methodist_admin":
+    current_page = "Панель администратора методистов"
 
 # Устанавливаем фильтры из URL-параметров
 set_filters_from_params(params)
@@ -223,6 +227,18 @@ if "card_id" in params and current_page == "Карточки":
 # Передаем функцию создания ссылок в функцию сайдбара
 pages.sidebar_filters(data, create_page_link)
 
+# Показываем информацию пользователя и кнопку выхода
+auth.show_user_menu()
+
+# Навигация по задачам и админке методистов через кнопки (без потери сессии)
+st.sidebar.markdown("---")
+if st.sidebar.button("📝 Мои задачи", key="sidebar_my_tasks"):
+    st.query_params = {"page": "my_tasks"}
+    st.rerun()
+if st.sidebar.button("👨‍🏫 Панель администратора методистов", key="sidebar_methodist_admin"):
+    st.query_params = {"page": "methodist_admin"}
+    st.rerun()
+
 # Словарь функций для страниц
 PAGES = {
     "Обзор": pages.page_overview,
@@ -232,6 +248,8 @@ PAGES = {
     "ГЗ": lambda df: pages.page_gz(df, create_page_link),  # Передаем функцию создания ссылок
     "Карточки": lambda df: pages.page_cards(df, engine),
     "⚙️ Настройки": pages.page_admin,
+    "Мои задачи": lambda df: pages.my_tasks.page_my_tasks(df, engine),
+    "Панель администратора методистов": lambda df: pages.methodist_admin.page_methodist_admin(df, engine),
 }
 
 # Запоминаем текущую страницу в состоянии

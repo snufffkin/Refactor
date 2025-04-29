@@ -299,24 +299,15 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
                 display_df["Уровень подлости"] = tricky_table["Уровень подлости"]
                 display_df["Риск"] = tricky_table["risk"].apply(lambda x: f"{x:.2f}")
                 
-                # Добавляем ссылки на карточки
-                # Используем create_link_fn для создания URL, если функция доступна
-                if create_link_fn:
-                    display_df["Действия"] = tricky_cards.apply(
-                        lambda row: f"[Детальный анализ]({create_link_fn('cards', card_id=int(row['card_id']))})" 
-                        if pd.notna(row['card_id']) else "-", 
-                        axis=1
-                    )
-                else:
-                    # Относительный URL как запасной вариант
-                    display_df["Действия"] = tricky_cards.apply(
-                        lambda row: f"[Детальный анализ](?page=cards&card_id={int(row['card_id'])})" 
-                        if pd.notna(row['card_id']) else "-", 
-                        axis=1
-                    )
-                
-                # Отображаем таблицу
-                st.dataframe(display_df, use_container_width=True)
+                # Отображаем таблицу без столбцов 'Действия' и 'Редактор'
+                st.dataframe(display_df, hide_index=True, use_container_width=True)
+                # Кнопки для перехода к детальному анализу трики-карточек
+                for _, row in tricky_cards.iterrows():
+                    card_id = int(row["card_id"])
+                    if st.button(f"Перейти к карточке {card_id}", key=f"gz_tricky_nav_{card_id}"):
+                        # Навигация без сброса сессии
+                        st.query_params = {"page": "cards", "card_id": str(card_id)}
+                        st.rerun()
         else:
             st.info("В этой группе заданий нет трики-карточек.")
     
@@ -373,24 +364,15 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
             display_df["Успешность"] = low_discr_cards["success_rate"].apply(lambda x: f"{x:.1%}")
             display_df["Риск"] = low_discr_cards["risk"].apply(lambda x: f"{x:.2f}")
             
-            # Добавляем ссылки на карточки
-            # Используем create_link_fn для создания URL, если функция доступна
-            if create_link_fn:
-                display_df["Действия"] = low_discr_cards.apply(
-                    lambda row: f"[Детальный анализ]({create_link_fn('cards', card_id=int(row['card_id']))})" 
-                    if pd.notna(row['card_id']) else "-", 
-                    axis=1
-                )
-            else:
-                # Относительный URL как запасной вариант
-                display_df["Действия"] = low_discr_cards.apply(
-                    lambda row: f"[Детальный анализ](?page=cards&card_id={int(row['card_id'])})" 
-                    if pd.notna(row['card_id']) else "-", 
-                    axis=1
-                )
-            
-            # Отображаем таблицу
-            st.dataframe(display_df, use_container_width=True)
+            # Отображаем таблицу без столбцов 'Действия' и 'Редактор'
+            st.dataframe(display_df, hide_index=True, use_container_width=True)
+            # Кнопки для перехода к детальному анализу карточек
+            for _, row in low_discr_cards.iterrows():
+                card_id = int(row['card_id'])
+                if st.button(f"Перейти к карточке {card_id}", key=f"gz_lowdiscr_nav_list_{card_id}"):
+                    # Навигация без сброса сессии
+                    st.query_params = {"page": "cards", "card_id": str(card_id)}
+                    st.rerun()
     
     # 5. Таблица с карточками и ссылками на карточки
     st.subheader("📋 Детальная информация по карточкам")
@@ -432,168 +414,72 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
     }
     display_df["Подлость"] = cards_df["trickiness_level"].map(trickiness_categories)
     
-    # Добавляем ссылки на страницу детального анализа карточки
-    if create_link_fn:
-        display_df["Действия"] = cards_df.apply(
-            lambda row: f"[Детальный анализ]({create_link_fn('cards', card_id=int(row['card_id']))})" 
-            if pd.notna(row['card_id']) else "-", 
-            axis=1
-        )
-    else:
-        display_df["Действия"] = cards_df.apply(
-            lambda row: f"[Детальный анализ](?page=cards&card_id={int(row['card_id'])})" 
-            if pd.notna(row['card_id']) else "-", 
-            axis=1
-        )
-    
-    # Добавляем ссылки на карточки в редакторе, если доступны URL
-    if "card_url" in df_gz.columns:
-        display_df["Редактор"] = df_gz.apply(
-            lambda row: f"[Открыть]({row['card_url']})" if pd.notna(row['card_url']) else "-", 
-            axis=1
-        )
-    
-    # Отображаем таблицу
+    # Отображаем таблицу без столбцов 'Действия' и 'Редактор'
     st.dataframe(display_df, hide_index=True, use_container_width=True)
+    # Кнопки для перехода к детальному анализу карточек
+    for _, row in cards_df.iterrows():
+        card_id = int(row['card_id'])
+        if st.button(f"Перейти к карточке {card_id}", key=f"gz_detail_nav_{card_id}"):
+            # Навигация без сброса сессии
+            st.query_params = {"page": "cards", "card_id": str(card_id)}
+            st.rerun()
     
-    # 6. Кнопки для быстрого перехода к анализу отдельных карточек
+    # 6. Кнопки для быстрого перехода ко всем карточкам
     st.subheader("🔍 Все карточки в группе заданий")
-
-    # Создаем кнопки для быстрого перехода ко всем карточкам
-    cards = df_gz.sort_values("risk", ascending=False).copy()
-
-    # Мы будем отображать карточки группами, по 4 в строке
-    CARDS_PER_ROW = 4
-    rows = (len(cards) + CARDS_PER_ROW - 1) // CARDS_PER_ROW  # Округление вверх
-
-    for row_idx in range(rows):
-        cols = st.columns(CARDS_PER_ROW)
-        
-        for col_idx in range(CARDS_PER_ROW):
-            card_idx = row_idx * CARDS_PER_ROW + col_idx
-            
-            # Если индекс выходит за пределы списка карточек, пропускаем
-            if card_idx >= len(cards):
-                continue
-                
-            with cols[col_idx]:
-                card = cards.iloc[card_idx]
-                card_id = int(card["card_id"])
-                risk = card["risk"]
-                card_type = card["card_type"]
-                
-                # Определяем цвет на основе риска
-                if risk > 0.75:
-                    color = "red"
-                elif risk > 0.5:
-                    color = "orange"
-                elif risk > 0.25:
-                    color = "gold"
-                else:
-                    color = "green"
-                
-                # Создаем дополнительные обозначения для специальных карточек
-                special_flags = []
-                if card["trickiness_level"] > 0:
-                    trickiness_level = trickiness_categories.get(int(card["trickiness_level"]), "")
-                    if trickiness_level:
-                        special_flags.append(f"📊 Подлость: {trickiness_level}")
-                        
-                if card["discrimination_avg"] < 0.15:
-                    special_flags.append("📉 Низкая дискр.")
-                    
-                if card["complaint_rate"] > 0.05:
-                    special_flags.append("⚠️ Жалобы")
-                
-                # Используем create_link_fn для создания URL, если функция доступна
-                if create_link_fn:
-                    card_url = create_link_fn("cards", card_id=card_id)
-                else:
-                    # Относительный URL как запасной вариант
-                    card_url = f"?page=cards&card_id={card_id}"
-                
-                # Создаем кнопку с соответствующим цветом и дополнительной информацией
-                st.markdown(
-                    f"<a href='{card_url}' target='_self' "
-                    f"style='text-decoration:none;color:{color};display:block;margin-bottom:8px;'>"
-                    f"ID: {card_id} - Риск: {risk:.2f} - {card_type}</a>"
-                    + (f"<div style='font-size:0.8em;color:#777;'>{' | '.join(special_flags)}</div>" if special_flags else ""),
-                    unsafe_allow_html=True
-                )
+    for _, card in df_gz.sort_values("risk", ascending=False).iterrows():
+        card_id = int(card["card_id"])
+        risk = card["risk"]
+        card_type = card["card_type"]
+        color = "red" if risk > 0.75 else ("orange" if risk > 0.5 else ("gold" if risk > 0.25 else "green"))
+        key = f"gz_card_nav_{card_id}"
+        if st.button(f"ID: {card_id} - Риск: {risk:.2f} - {card_type}", key=key):
+            st.query_params = {"page": "cards", "card_id": str(card_id)}
+            st.rerun()
+        # Специальные флаги
+        special_flags = []
+        if card.get("trickiness_level", 0) > 0:
+            level_text = trickiness_categories.get(int(card["trickiness_level"]), "")
+            if level_text:
+                special_flags.append(f"📊 Подлость: {level_text}")
+        if card.get("discrimination_avg", 0) < 0.15:
+            special_flags.append("📉 Низкая дискриминативность")
+        if card.get("complaint_rate", 0) > 0.05:
+            special_flags.append("⚠️ Жалобы")
+        if special_flags:
+            st.caption(" | ".join(special_flags))
     
     # Создаем список трики-карточек
     tricky_cards = df_gz[df_gz["trickiness_level"] > 0].sort_values("trickiness_level", ascending=False)
     
     if not tricky_cards.empty:
         st.markdown("### Трики-карточки")
-        
-        # Создаем кнопки для быстрого перехода
-        cols = st.columns(4)
-        for i, (_, card) in enumerate(tricky_cards.iterrows()):
-            col_idx = i % 4
-            with cols[col_idx]:
-                card_id = int(card["card_id"])
-                trickiness = card["trickiness_level"]
-                card_type = card["card_type"]
-                
-                # Создаем цвет на основе уровня подлости
-                color = "red" if trickiness == 3 else ("orange" if trickiness == 2 else "gold")
-                
-                # Используем create_link_fn для создания URL, если функция доступна
-                if create_link_fn:
-                    card_url = create_link_fn("cards", card_id=card_id)
-                else:
-                    # Относительный URL как запасной вариант
-                    card_url = f"?page=cards&card_id={card_id}"
-                
-                # Создаем кнопку с соответствующим цветом
-                trickiness_text = trickiness_categories.get(trickiness, "")
-                st.markdown(
-                    f"<a href='{card_url}' target='_self' "
-                    f"style='text-decoration:none;color:{color};'>"
-                    f"ID: {card_id} - Подлость: {trickiness_text} - {card_type}</a>",
-                    unsafe_allow_html=True
-                )
-                
-                # Ограничиваем количество отображаемых карточек
-                if i >= 11:  # Показываем максимум 12 карточек
-                    st.markdown(f"И еще {len(tricky_cards) - 12} карточек...")
-                    break
+        for _, card in tricky_cards.iterrows():
+            card_id = int(card["card_id"])
+            trickiness = card.get("trickiness_level", 0)
+            color = "red" if trickiness == 3 else ("orange" if trickiness == 2 else "gold")
+            key = f"gz_tricky_nav_list_{card_id}"
+            if st.button(f"ID: {card_id} - Подлость: {trickiness} - {card['card_type']}", key=key):
+                st.query_params = {"page": "cards", "card_id": str(card_id)}
+                st.rerun()
+        # Отображаем оставшиеся карточки при большом числе
+        if len(tricky_cards) > 12:
+            st.info(f"И еще {len(tricky_cards) - 12} карточек...")
     
     # Создаем список карточек с низкой дискриминативностью
     low_discr_cards = df_gz[df_gz["discrimination_avg"] < 0.15].sort_values("discrimination_avg")
     
     if not low_discr_cards.empty:
         st.markdown("### Карточки с низкой дискриминативностью")
-        
-        # Создаем кнопки для быстрого перехода
-        cols = st.columns(4)
-        for i, (_, card) in enumerate(low_discr_cards.iterrows()):
-            col_idx = i % 4
-            with cols[col_idx]:
-                card_id = int(card["card_id"])
-                discr = card["discrimination_avg"]
-                card_type = card["card_type"]
-                
-                # Используем create_link_fn для создания URL, если функция доступна
-                if create_link_fn:
-                    card_url = create_link_fn("cards", card_id=card_id)
-                else:
-                    # Относительный URL как запасной вариант
-                    card_url = f"?page=cards&card_id={card_id}"
-                
-                # Создаем кнопку
-                st.markdown(
-                    f"<a href='{card_url}' target='_self' "
-                    f"style='text-decoration:none;color:purple;'>"
-                    f"ID: {card_id} - Дискр.: {discr:.2f} - {card_type}</a>",
-                    unsafe_allow_html=True
-                )
-                
-                # Ограничиваем количество отображаемых карточек
-                if i >= 11:  # Показываем максимум 12 карточек
-                    st.markdown(f"И еще {len(low_discr_cards) - 12} карточек...")
-                    break
+        for _, card in low_discr_cards.iterrows():
+            card_id = int(card["card_id"])
+            discr = card["discrimination_avg"]
+            color = "purple"
+            key = f"gz_lowdiscr_nav_list_{card_id}"
+            if st.button(f"ID: {card_id} - Дискр.: {discr:.2f} - {card['card_type']}", key=key):
+                st.query_params = {"page": "cards", "card_id": str(card_id)}
+                st.rerun()
+        if len(low_discr_cards) > 12:
+            st.info(f"И еще {len(low_discr_cards) - 12} карточек...")
 
 def _page_gz_inline(df: pd.DataFrame):
     """Встроенная версия страницы групп заданий для отображения на странице урока"""
