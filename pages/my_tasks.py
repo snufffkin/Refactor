@@ -17,6 +17,12 @@ def page_my_tasks(df: pd.DataFrame, engine):
     user_id = st.session_state.user_id
     assignments = auth.get_assigned_cards(engine, user_id)
     
+    # Выводим полученные задачи для отладки
+    st.write("Данные assignments:", assignments.shape)
+    if not assignments.empty:
+        st.write("Колонки:", assignments.columns.tolist())
+        st.write("Пример данных:", assignments.head(1).to_dict('records'))
+    
     if assignments.empty:
         st.info("У вас нет назначенных карточек")
     else:
@@ -36,7 +42,7 @@ def page_my_tasks(df: pd.DataFrame, engine):
             "wont_fix": "Не будет исправлено"
         }
         
-        status_counts["Название"] = status_counts["Статус"].map(status_labels)
+        status_counts["Название"] = status_counts["Статус"].apply(lambda status: status_labels.get(status, str(status)))
         
         # Отображаем метрики в строку
         cols = st.columns(len(status_counts))

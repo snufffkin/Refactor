@@ -8,6 +8,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
+from sqlalchemy import text
 
 import core
 from components.utils import create_hierarchical_header, add_gz_links
@@ -86,6 +87,164 @@ def display_card_details(card_data):
                 st.markdown(f"**{key}:** {value}", unsafe_allow_html=True)
             else:
                 st.markdown(f"**{key}:** {value}")
+
+def display_course_links(card_id, engine):
+    """
+    Отображает привязку карточки к курсам, урокам и группам заданий
+    
+    Args:
+        card_id: ID карточки
+        engine: SQLAlchemy engine для подключения к БД
+    """
+    st.markdown("## Привязка к курсам")
+    
+    # Запрос для получения всех уроков и ГЗ, к которым привязана карточка
+    query = text("""
+        SELECT 
+            ca.program,
+            ca.module,
+            ca.lesson,
+            ca.gz,
+            ca.card_type
+        FROM 
+            card_assignments ca
+        WHERE 
+            ca.card_id = :card_id
+        ORDER BY 
+            ca.program, ca.module, ca.lesson, ca.gz
+    """)
+    
+    try:
+        # Выполняем запрос
+        with engine.connect() as conn:
+            result = conn.execute(query, {"card_id": card_id})
+            course_links = [row._asdict() for row in result]
+        
+        # Если нет данных, показываем сообщение
+        if not course_links:
+            st.info("Нет данных о привязке карточки к курсам.")
+            return
+        
+        # Создаем DataFrame из результатов запроса
+        links_df = pd.DataFrame(course_links)
+        
+        # Группируем по программе, модулю, уроку для лучшего отображения
+        grouped = links_df.groupby(['program', 'module', 'lesson'])
+        
+        # Отображаем данные в виде иерархического списка с ссылками
+        for (program, module, lesson), group in grouped:
+            with st.expander(f"📚 {program} / {module} / {lesson}", expanded=True):
+                # Создаем таблицу с группами заданий
+                st.markdown("### Группы заданий")
+                
+                # Создаем таблицу
+                for _, row in group.iterrows():
+                    gz = row['gz']
+                    card_type = row['card_type']
+                    
+                    # Формируем URL для перехода к ГЗ
+                    gz_url_params = {
+                        "program": program,
+                        "module": module,
+                        "lesson": lesson,
+                        "gz": gz
+                    }
+                    gz_url = f"/?{core.encode_query_params(gz_url_params)}"
+                    
+                    # Отображаем строку с ссылкой
+                    st.markdown(f"- **ГЗ**: [{gz}]({gz_url}) - **Тип карточки**: {card_type}")
+    
+    except Exception as e:
+        st.error(f"Ошибка при загрузке данных о привязке карточки к курсам: {str(e)}")
+        
+        # Попробуем альтернативный запрос, если первый не сработал
+        try:
+            # Альтернативный запрос с использованием объединения таблиц
+            alt_query = text("""
+                SELECT 
+                    cs.card_id,
+                    p.program_name as program,
+                    m.module_name as module,
+                    l.lesson_name as lesson,
+                    g.gz_name as gz,
+                    cs.card_type
+                FROM 
+                    card_status cs
+                JOIN programs p ON cs.program_id = p.program_id
+                JOIN modules m ON cs.module_id = m.module_id
+                JOIN lessons l ON cs.lesson_id = l.lesson_id
+                JOIN group_zadaniy g ON cs.gz_id = g.gz_id
+                WHERE 
+                    cs.card_id = :card_id
+                ORDER BY 
+                    p.program_name, m.module_name, l.lesson_name, g.gz_name
+            """)
+            
+            with engine.connect() as conn:
+                result = conn.execute(alt_query, {"card_id": card_id})
+                course_links = [row._asdict() for row in result]
+            
+            if not course_links:
+                st.info("Нет данных о привязке карточки к курсам (второй запрос).")
+                return
+            
+            links_df = pd.DataFrame(course_links)
+            
+            grouped = links_df.groupby(['program', 'module', 'lesson'])
+            
+            for (program, module, lesson), group in grouped:
+                with st.expander(f"📚 {program} / {module} / {lesson}", expanded=True):
+                    st.markdown("### Группы заданий")
+                    
+                    for _, row in group.iterrows():
+                        gz = row['gz']
+                        card_type = row['card_type']
+                        
+                        gz_url_params = {
+                            "program": program,
+                            "module": module,
+                            "lesson": lesson,
+                            "gz": gz
+                        }
+                        gz_url = f"/?{core.encode_query_params(gz_url_params)}"
+                        
+                        st.markdown(f"- **ГЗ**: [{gz}]({gz_url}) - **Тип карточки**: {card_type}")
+        
+        except Exception as e2:
+            # Если и второй запрос не сработал, используем данные из DataFrame
+            st.error(f"Альтернативный запрос тоже не сработал: {str(e2)}")
+            st.info("Использую данные из текущей карточки:")
+            
+            try:
+                # Получаем данные из основного DataFrame
+                card_data_df = df[df["card_id"] == card_id]
+                
+                if not card_data_df.empty:
+                    for _, row in card_data_df.iterrows():
+                        program = row.get("program", "Неизвестно")
+                        module = row.get("module", "Неизвестно")
+                        lesson = row.get("lesson", "Неизвестно")
+                        gz = row.get("gz", "Неизвестно")
+                        card_type = row.get("card_type", "Неизвестно")
+                        
+                        st.markdown(f"## 📚 {program} / {module} / {lesson}")
+                        st.markdown(f"### Группа заданий: {gz}")
+                        st.markdown(f"**Тип карточки**: {card_type}")
+                        
+                        # Формируем URL для перехода к ГЗ
+                        gz_url_params = {
+                            "program": program,
+                            "module": module,
+                            "lesson": lesson,
+                            "gz": gz
+                        }
+                        gz_url = f"/?{core.encode_query_params(gz_url_params)}"
+                        
+                        st.markdown(f"[Перейти к группе заданий]({gz_url})")
+                else:
+                    st.warning("Не удалось найти информацию о карточке.")
+            except Exception as e3:
+                st.error(f"Не удалось отобразить данные из DataFrame: {str(e3)}")
 
 def display_risk_components(card_data):
     """
@@ -708,13 +867,48 @@ def display_card_status_form(card_data, engine):
         # Если кнопка нажата и статус изменился
         if submit_button and new_status != current_status:
             # Создаем оригинальный и отредактированный датафреймы для функции сохранения
-            original_df = pd.DataFrame([card_data])
+            original_df = pd.DataFrame([card_data.to_dict()]).reset_index(drop=True)
             edited_df = original_df.copy()
             edited_df.loc[0, "status"] = new_status
             
             # Сохраняем изменения
             try:
+                # Обновляем статус в таблице card_status
                 core.save_status_changes(original_df, edited_df, engine)
+                
+                # Синхронизируем с card_assignments - обновляем или создаем назначение
+                with engine.begin() as conn:
+                    # Проверяем, есть ли уже назначение для этой карточки
+                    card_id = int(card_data["card_id"])
+                    assignment = conn.execute(text(
+                        "SELECT assignment_id FROM card_assignments WHERE card_id = :card_id"
+                    ), {"card_id": card_id}).fetchone()
+                    
+                    # Получаем текущего пользователя
+                    user_id = st.session_state.get("user_id", 1)  # Если нет, используем 1 (админ)
+                    
+                    if assignment:
+                        # Если есть назначение, обновляем статус
+                        assignment_id = assignment[0]
+                        conn.execute(text("""
+                            UPDATE card_assignments
+                            SET status = :status, updated_at = CURRENT_TIMESTAMP
+                            WHERE assignment_id = :assignment_id
+                        """), {
+                            "status": new_status,
+                            "assignment_id": assignment_id
+                        })
+                    else:
+                        # Если нет назначения, создаем его
+                        conn.execute(text("""
+                            INSERT INTO card_assignments (card_id, user_id, status) 
+                            VALUES (:card_id, :user_id, :status)
+                        """), {
+                            "card_id": card_id,
+                            "user_id": user_id,
+                            "status": new_status
+                        })
+                
                 st.success(f"Статус карточки обновлен с '{current_status}' на '{new_status}'")
             except Exception as e:
                 st.error(f"Ошибка при обновлении статуса: {str(e)}")
@@ -806,6 +1000,9 @@ def page_cards(df: pd.DataFrame, eng):
     
     # Отображаем основную информацию о карточке
     display_card_details(card_data)
+    
+    # Отображаем привязку к курсам
+    display_course_links(int(card_data["card_id"]), eng)
     
     # Добавляем разделитель
     st.markdown("---")

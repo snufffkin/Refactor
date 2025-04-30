@@ -17,6 +17,7 @@ import core
 import pages
 import pages.my_tasks
 import pages.methodist_admin
+import navigation_utils
 
 # Настройка страницы
 st.set_page_config(
@@ -101,15 +102,6 @@ st.markdown("""
         padding: 0 !important;
     }
     
-    /* Кастомизация элементов Streamlit в сайдбаре */
-    div[data-testid="stSidebar"] div[data-testid="stMarkdown"] h3 {
-        color: rgba(255, 255, 255, 0.7);
-        font-size: 16px;
-        font-weight: 600;
-        margin-top: 20px;
-        margin-bottom: 10px;
-    }
-    
     /* Стили для скролла */
     div[data-testid="stSidebar"]::-webkit-scrollbar {
         width: 5px;
@@ -127,6 +119,71 @@ st.markdown("""
     div[data-testid="stSidebar"]::-webkit-scrollbar-thumb:hover {
         background: rgba(255, 255, 255, 0.3);
     }
+    
+    /* Кастомизация элементов Streamlit в сайдбаре */
+    div[data-testid="stSidebar"] div[data-testid="stMarkdown"] h3 {
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 16px;
+        font-weight: 600;
+        margin-top: 20px;
+        margin-bottom: 10px;
+    }
+    
+    /* Стили для кнопок навигации */
+    div[data-testid="stButton"] button {
+        border-radius: 4px;
+        font-weight: bold;
+        padding: 0.5rem 0.5rem;
+        min-width: 40px;
+        background-color: rgba(28, 131, 225, 0.1);
+        border: 1px solid rgba(77, 166, 255, 0.3);
+        transition: all 0.2s ease;
+        font-size: 16px;
+    }
+    
+    div[data-testid="stButton"] button:hover {
+        background-color: rgba(28, 131, 225, 0.3);
+        border: 1px solid rgba(77, 166, 255, 0.6);
+    }
+    
+    div[data-testid="stButton"] button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        background-color: rgba(28, 131, 225, 0.05);
+        border: 1px solid rgba(77, 166, 255, 0.1);
+    }
+    
+    /* Стили для контейнера панели навигации */
+    .nav-container {
+        margin-bottom: 10px;
+        padding: 5px 0;
+        border-bottom: 1px solid rgba(77, 166, 255, 0.1);
+    }
+    
+    /* Стили для навигации в сайдбаре */
+    .sidebar-nav-container {
+        margin-bottom: 15px;
+    }
+    
+    /* Стили для SVG иконок в кнопках */
+    div[data-testid="stButton"] button img {
+        display: inline-block;
+        vertical-align: middle;
+    }
+    
+    /* Выравнивание для кнопок в сайдбаре */
+    .stButton > button {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 36px;
+    }
+    
+    /* Стили для текста текущей страницы */
+    .sidebar-nav-container div[data-testid="stMarkdown"] {
+        margin-top: 8px;
+        text-align: center;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -143,20 +200,6 @@ def load_cached_data(_engine):
     data["risk"] = data.apply(core.risk_score, axis=1)
     
     return data
-
-# Функция для создания ссылок с параметрами
-def create_page_link(page, **params):
-    """Создает URL с параметрами для навигации между страницами"""
-    base_url = "?"
-    all_params = {"page": page}
-    all_params.update(params)
-    
-    param_strings = []
-    for key, value in all_params.items():
-        if value is not None:
-            param_strings.append(f"{key}={ul.quote_plus(str(value))}")
-    
-    return base_url + "&".join(param_strings)
 
 # Функция для установки фильтров из URL-параметров
 def set_filters_from_params(params):
@@ -179,6 +222,9 @@ data = load_cached_data(engine)
 
 # ---------------------- Обработка URL-параметров ---------------------- #
 params = st.query_params
+
+# Инициализация системы навигации
+navigation_utils.init_navigation_history()
 
 # Устанавливаем текущую страницу
 current_page = params.get("page", "overview")
@@ -224,8 +270,11 @@ if "card_id" in params and current_page == "Карточки":
             st.session_state["filter_gz"] = card_data["gz"].iloc[0]
 
 # ---------------------- sidebar & navigation ------------------------------ #
+# Отображаем навигацию в верхней части сайдбара
+navigation_utils.sidebar_navigation()
+
 # Передаем функцию создания ссылок в функцию сайдбара
-pages.sidebar_filters(data, create_page_link)
+pages.sidebar_filters(data, navigation_utils.create_page_link)
 
 # Показываем информацию пользователя и кнопку выхода
 auth.show_user_menu()
@@ -245,7 +294,7 @@ PAGES = {
     "Программы": pages.page_programs,
     "Модули": pages.page_modules,
     "Уроки": pages.page_lessons,
-    "ГЗ": lambda df: pages.page_gz(df, create_page_link),  # Передаем функцию создания ссылок
+    "ГЗ": lambda df: pages.page_gz(df, navigation_utils.create_page_link),  # Передаем функцию создания ссылок
     "Карточки": lambda df: pages.page_cards(df, engine),
     "⚙️ Настройки": pages.page_admin,
     "Мои задачи": lambda df: pages.my_tasks.page_my_tasks(df, engine),
