@@ -15,6 +15,7 @@ import core
 from components.utils import create_hierarchical_header, display_clickable_items, add_gz_links
 from components.metrics import display_metrics_row, display_status_chart, display_risk_distribution
 from components.charts import display_cards_chart, display_risk_bar_chart, display_metrics_comparison, display_success_complaints_chart, display_completion_radar, display_trickiness_chart, display_trickiness_success_chart
+import navigation_utils
 
 def page_gz(df: pd.DataFrame, create_link_fn=None):
     """Страница группы заданий с детализацией по карточкам"""
@@ -306,7 +307,7 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
                     card_id = int(row["card_id"])
                     if st.button(f"Перейти к карточке {card_id}", key=f"gz_tricky_nav_{card_id}"):
                         # Навигация без сброса сессии
-                        st.query_params = {"page": "cards", "card_id": str(card_id)}
+                        navigation_utils.navigate_to("cards", card_id=str(card_id))
                         st.rerun()
         else:
             st.info("В этой группе заданий нет трики-карточек.")
@@ -371,7 +372,7 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
                 card_id = int(row['card_id'])
                 if st.button(f"Перейти к карточке {card_id}", key=f"gz_lowdiscr_nav_list_{card_id}"):
                     # Навигация без сброса сессии
-                    st.query_params = {"page": "cards", "card_id": str(card_id)}
+                    navigation_utils.navigate_to("cards", card_id=str(card_id))
                     st.rerun()
     
     # 5. Таблица с карточками и ссылками на карточки
@@ -421,7 +422,7 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
         card_id = int(row['card_id'])
         if st.button(f"Перейти к карточке {card_id}", key=f"gz_detail_nav_{card_id}"):
             # Навигация без сброса сессии
-            st.query_params = {"page": "cards", "card_id": str(card_id)}
+            navigation_utils.navigate_to("cards", card_id=str(card_id))
             st.rerun()
     
     # 6. Кнопки для быстрого перехода ко всем карточкам
@@ -433,7 +434,7 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
         color = "red" if risk > 0.75 else ("orange" if risk > 0.5 else ("gold" if risk > 0.25 else "green"))
         key = f"gz_card_nav_{card_id}"
         if st.button(f"ID: {card_id} - Риск: {risk:.2f} - {card_type}", key=key):
-            st.query_params = {"page": "cards", "card_id": str(card_id)}
+            navigation_utils.navigate_to("cards", card_id=str(card_id))
             st.rerun()
         # Специальные флаги
         special_flags = []
@@ -459,7 +460,7 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
             color = "red" if trickiness == 3 else ("orange" if trickiness == 2 else "gold")
             key = f"gz_tricky_nav_list_{card_id}"
             if st.button(f"ID: {card_id} - Подлость: {trickiness} - {card['card_type']}", key=key):
-                st.query_params = {"page": "cards", "card_id": str(card_id)}
+                navigation_utils.navigate_to("cards", card_id=str(card_id))
                 st.rerun()
         # Отображаем оставшиеся карточки при большом числе
         if len(tricky_cards) > 12:
@@ -476,7 +477,7 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
             color = "purple"
             key = f"gz_lowdiscr_nav_list_{card_id}"
             if st.button(f"ID: {card_id} - Дискр.: {discr:.2f} - {card['card_type']}", key=key):
-                st.query_params = {"page": "cards", "card_id": str(card_id)}
+                navigation_utils.navigate_to("cards", card_id=str(card_id))
                 st.rerun()
         if len(low_discr_cards) > 12:
             st.info(f"И еще {len(low_discr_cards) - 12} карточек...")

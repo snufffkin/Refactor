@@ -12,6 +12,7 @@ import numpy as np
 import core
 from components.metrics import display_metrics_row, display_status_chart, display_risk_distribution
 from components.charts import display_risk_bar_chart, display_metrics_comparison, display_success_complaints_chart
+import navigation_utils
 
 def page_overview(df: pd.DataFrame):
     """Страница с обзором всех программ"""

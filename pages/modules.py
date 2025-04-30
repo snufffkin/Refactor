@@ -13,6 +13,7 @@ import core
 from components.utils import create_hierarchical_header, display_clickable_items
 from components.metrics import display_metrics_row, display_status_chart, display_risk_distribution
 from components.charts import display_risk_bar_chart, display_metrics_comparison, display_success_complaints_chart, display_completion_radar
+import navigation_utils
 
 def page_modules(df: pd.DataFrame):
     """Страница модуля с детализацией по урокам"""

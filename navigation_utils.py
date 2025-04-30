@@ -96,13 +96,19 @@ def navigate_back():
     """
     init_navigation_history()
     
+    print(f"navigation_utils.navigate_back: history_position={st.session_state.nav_history_position}, history_size={len(st.session_state.nav_history)}")
+    print(f"navigation_utils.navigate_back: history={st.session_state.nav_history}")
+    
     if st.session_state.nav_history_position > 0:
         st.session_state.nav_history_position -= 1
         params = st.session_state.nav_history[st.session_state.nav_history_position]
+        print(f"navigation_utils.navigate_back: переходим к params={params}")
         st.query_params.clear()
         for key, value in params.items():
             st.query_params[key] = value
         return True
+    
+    print("navigation_utils.navigate_back: история пуста или мы в начале")
     return False
 
 def navigate_forward():
@@ -354,4 +360,14 @@ def show_navigation_debug():
             })
         
         # Выводим таблицу с историей
-        st.table(history_data) 
+        st.table(history_data)
+
+def get_history_size():
+    """
+    Возвращает размер истории навигации
+    
+    Returns:
+        int: Количество элементов в истории навигации
+    """
+    init_navigation_history()
+    return len(st.session_state.nav_history) 

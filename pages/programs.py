@@ -13,6 +13,7 @@ import core
 from components.utils import create_hierarchical_header, display_clickable_items
 from components.metrics import display_metrics_row, display_status_chart, display_risk_distribution
 from components.charts import display_risk_bar_chart, display_metrics_comparison, display_success_complaints_chart
+import navigation_utils
 
 def page_programs(df: pd.DataFrame):
     """Страница программы с детализацией по модулям"""

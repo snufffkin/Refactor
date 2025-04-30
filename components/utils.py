@@ -6,6 +6,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import navigation_utils
 
 def create_hierarchical_header(levels, values, emoji_map=None):
     """
@@ -63,11 +64,8 @@ def create_hierarchical_header(levels, values, emoji_map=None):
                 # Кнопка навигации
                 key = f"nav_header_{level}_{i}"
                 if st.button(f"{value}", key=key):
-                    # Устанавливаем query params и перезапускаем
-                    params_for_url = {"page": target_page}
-                    params_for_url.update(params)
-                    st.query_params = params_for_url
-                    st.rerun()
+                    # Используем функцию navigate_to вместо прямой установки query_params
+                    navigation_utils.navigate_to(target_page, **params)
             else:
                 st.markdown(f"**{value or '—'}**")
     
@@ -130,10 +128,8 @@ def display_clickable_items(df, column, level, metrics=None):
             metrics_suffix = "-".join(metrics) if metrics else ""
             key = f"nav_item_{level}_{metrics_suffix}_{i}"
             if st.button(f"{row[column]}", key=key):
-                params_for_url = {"page": target_page}
-                params_for_url.update(url_params)
-                st.query_params = params_for_url
-                st.rerun()
+                # Используем функцию navigate_to вместо прямой установки query_params
+                navigation_utils.navigate_to(target_page, **url_params)
             # Показ метрик рядом с кнопкой
             if metrics:
                 metrics_str = []
