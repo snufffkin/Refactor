@@ -1,27 +1,121 @@
 #!/bin/bash
 
-# fix_db_import_v2.sh - Исправление проблем с импортом данных
-# Для использования на виртуальной машине Ubuntu
+# fix_db_import_v3.sh - Скрипт для исправления проблем с импортом данных
+# Использует более надежные методы для удаления дубликатов
 
 set -e  # Остановка скрипта при ошибке
 
 echo "-----------------------------------------------------"
-echo "  Полное пересоздание таблиц и импорт данных"
+echo "  Исправление проблем импорта с удалением дубликатов"
 echo "-----------------------------------------------------"
 
-# Активация переменной окружения для текущей сессии
+# Активируем переменную окружения
 export DB_DSN="postgresql:///course_quality"
 echo "Переменная окружения DB_DSN установлена: $DB_DSN"
 
-# Проверяем доступ к базе данных
-echo "Проверка подключения к PostgreSQL..."
-if ! psql -d course_quality -c "SELECT 1;" > /dev/null 2>&1; then
-    echo "ОШИБКА: Не удалось подключиться к базе данных course_quality."
-    exit 1
+# Проверяем, установлен ли Python
+if ! command -v python3 &> /dev/null; then
+    echo "Python не установлен. Установка Python..."
+    sudo apt update
+    sudo apt install -y python3 python3-pip
 fi
 
-# Полное удаление и пересоздание таблиц
-echo "Полное пересоздание таблиц..."
+# Создаем Python-скрипт для обработки CSV файлов
+cat > process_csv.py << 'EOL'
+#!/usr/bin/env python3
+import csv
+import sys
+
+def process_csv(input_file, output_file, key_column):
+    """
+    Обрабатывает CSV файл, удаляя дубликаты по указанному ключевому столбцу.
+    Сохраняет только первое вхождение каждого ключа.
+    """
+    print(f"Обработка файла {input_file}, ключевой столбец: {key_column}")
+    
+    # Чтение CSV файла
+    with open(input_file, 'r', encoding='utf-8-sig') as infile:
+        # Используем 'utf-8-sig' для правильной обработки BOM
+        reader = csv.reader(infile)
+        header = next(reader)  # Сохраняем заголовок
+        
+        # Находим индекс указанного столбца
+        try:
+            key_index = header.index(key_column)
+        except ValueError:
+            print(f"ОШИБКА: Столбец '{key_column}' не найден в заголовке файла. Доступные столбцы: {header}")
+            sys.exit(1)
+        
+        # Читаем строки и удаляем дубликаты
+        rows = []
+        seen_keys = set()
+        duplicates = []
+        
+        for row in reader:
+            if len(row) <= key_index:
+                print(f"Предупреждение: строка с недостаточным количеством столбцов пропущена: {row}")
+                continue
+                
+            key = row[key_index]
+            if key in seen_keys:
+                duplicates.append(key)
+                continue
+            seen_keys.add(key)
+            rows.append(row)
+        
+        # Выводим информацию о дубликатах
+        duplicate_count = len(duplicates)
+        if duplicate_count > 0:
+            print(f"Удалено {duplicate_count} дубликатов по ключу '{key_column}'")
+            if duplicate_count < 10:
+                print(f"Дублирующиеся ключи: {', '.join(duplicates)}")
+            else:
+                print(f"Первые 10 дублирующихся ключей: {', '.join(duplicates[:10])}...")
+    
+    # Запись обработанного файла
+    with open(output_file, 'w', newline='', encoding='utf-8') as outfile:
+        writer = csv.writer(outfile)
+        writer.writerow(header)
+        writer.writerows(rows)
+    
+    print(f"Сохранено {len(rows)} уникальных строк в {output_file}")
+    return len(rows)
+
+if __name__ == "__main__":
+    if len(sys.argv) < 4:
+        print("Использование: python process_csv.py <входной_файл> <выходной_файл> <ключевой_столбец>")
+        sys.exit(1)
+    
+    input_file = sys.argv[1]
+    output_file = sys.argv[2]
+    key_column = sys.argv[3]
+    
+    process_csv(input_file, output_file, key_column)
+EOL
+
+# Делаем скрипт исполняемым
+chmod +x process_csv.py
+
+# Обрабатываем файлы CSV с использованием Python-скрипта
+echo "Обработка CSV-файлов для удаления дубликатов..."
+
+echo "1. Анализ файла cards_structure.csv..."
+# Сначала определим заголовок файла
+header=$(head -1 db_export/cards_structure.csv)
+echo "Заголовок: $header"
+
+# Обрабатываем файлы
+echo "2. Обработка cards_structure.csv..."
+python3 process_csv.py db_export/cards_structure.csv db_export/cards_structure_clean.csv "card_id"
+
+echo "3. Обработка cards_metrics.csv..."
+python3 process_csv.py db_export/cards_metrics.csv db_export/cards_metrics_clean.csv "card_id"
+
+echo "4. Обработка card_status.csv..."
+python3 process_csv.py db_export/card_status.csv db_export/card_status_clean.csv "card_id"
+
+# Пересоздаем таблицы
+echo "5. Полное пересоздание таблиц..."
 psql -d course_quality << EOF
 -- Удаляем представление
 DROP VIEW IF EXISTS cards_mv;
@@ -104,56 +198,29 @@ CREATE TABLE IF NOT EXISTS assignment_history (
 );
 EOF
 
-echo "Таблицы успешно пересозданы."
+# Импорт данных с обработкой ошибок
+echo "6. Импорт обработанных данных в базу данных..."
 
-# Удаление дубликатов из файлов CSV
-echo "Обработка CSV-файлов для удаления дубликатов..."
-
-# Обработка cards_structure.csv - удаление дубликатов
-echo "Обработка cards_structure.csv..."
-awk -F, 'NR==1 {header=$0; print; next} !seen[$8]++ {print}' db_export/cards_structure.csv > db_export/cards_structure_unique.csv
-mv db_export/cards_structure_unique.csv db_export/cards_structure.csv
-
-# Обработка cards_metrics.csv - удаление дубликатов
-echo "Обработка cards_metrics.csv..."
-awk -F, 'NR==1 {header=$0; print; next} !seen[$1]++ {print}' db_export/cards_metrics.csv > db_export/cards_metrics_unique.csv
-mv db_export/cards_metrics_unique.csv db_export/cards_metrics.csv
-
-# Обработка card_status.csv - удаление дубликатов
-echo "Обработка card_status.csv..."
-awk -F, 'NR==1 {header=$0; print; next} !seen[$1]++ {print}' db_export/card_status.csv > db_export/card_status_unique.csv
-mv db_export/card_status_unique.csv db_export/card_status.csv
-
-# Конвертация UTF-8 с BOM в обычный UTF-8 (если есть)
-for file in db_export/*.csv; do
-    # Проверяем наличие BOM
-    if [ $(hexdump -n 3 -v -e '1/1 "%02X"' "$file") = "EFBBBF" ]; then
-        echo "Удаление BOM из файла $(basename "$file")..."
-        (sed '1s/^\xEF\xBB\xBF//' < "$file" > "${file}.tmp" && mv "${file}.tmp" "$file")
-    fi
-done
-
-# Импорт данных с использованием psql -c
-echo "Импорт данных cards_structure..."
-psql -d course_quality -c "\COPY cards_structure FROM 'db_export/cards_structure.csv' WITH CSV HEADER" || {
-    echo "ОШИБКА: Не удалось импортировать cards_structure."
+echo "Импорт cards_structure..."
+if ! psql -d course_quality -c "\COPY cards_structure FROM 'db_export/cards_structure_clean.csv' WITH CSV HEADER"; then
+    echo "ОШИБКА при импорте cards_structure!"
     exit 1
-}
+fi
 
-echo "Импорт данных cards_metrics..."
-psql -d course_quality -c "\COPY cards_metrics FROM 'db_export/cards_metrics.csv' WITH CSV HEADER" || {
-    echo "ОШИБКА: Не удалось импортировать cards_metrics."
+echo "Импорт cards_metrics..."
+if ! psql -d course_quality -c "\COPY cards_metrics FROM 'db_export/cards_metrics_clean.csv' WITH CSV HEADER"; then
+    echo "ОШИБКА при импорте cards_metrics!"
     exit 1
-}
+fi
 
-echo "Импорт данных card_status..."
-psql -d course_quality -c "\COPY card_status FROM 'db_export/card_status.csv' WITH CSV HEADER" || {
-    echo "ОШИБКА: Не удалось импортировать card_status."
+echo "Импорт card_status..."
+if ! psql -d course_quality -c "\COPY card_status FROM 'db_export/card_status_clean.csv' WITH CSV HEADER"; then
+    echo "ОШИБКА при импорте card_status!"
     exit 1
-}
+fi
 
 # Проверка результатов импорта
-echo "Проверка результатов импорта..."
+echo "7. Проверка результатов импорта..."
 cards_structure_count=$(psql -d course_quality -t -c "SELECT COUNT(*) FROM cards_structure;")
 cards_metrics_count=$(psql -d course_quality -t -c "SELECT COUNT(*) FROM cards_metrics;")
 card_status_count=$(psql -d course_quality -t -c "SELECT COUNT(*) FROM card_status;")
@@ -162,19 +229,14 @@ echo "Количество записей в cards_structure: $cards_structure_c
 echo "Количество записей в cards_metrics: $cards_metrics_count"
 echo "Количество записей в card_status: $card_status_count"
 
-# Создание необходимых индексов
-echo "Создание индексов..."
-psql -d course_quality -c "CREATE INDEX IF NOT EXISTS idx_cards_structure_program ON cards_structure(program);"
-psql -d course_quality -c "CREATE INDEX IF NOT EXISTS idx_cards_structure_module ON cards_structure(module);"
-psql -d course_quality -c "CREATE INDEX IF NOT EXISTS idx_cards_structure_lesson ON cards_structure(lesson);"
-psql -d course_quality -c "CREATE INDEX IF NOT EXISTS idx_cards_structure_gz ON cards_structure(gz);"
+# Добавляем переменную окружения в файлы запуска
+echo "8. Настройка переменной окружения..."
 
-# Обеспечение переменной окружения
-echo "Обеспечение переменной окружения DB_DSN..."
-
-# В файле запуска приложения
+# В start.sh
 if [ -f "start.sh" ]; then
-    grep -q "export DB_DSN=" "start.sh" || sed -i '1s/^/export DB_DSN="postgresql:\/\/\/course_quality"\n/' "start.sh"
+    if ! grep -q "export DB_DSN=" "start.sh"; then
+        sed -i '1s/^/export DB_DSN="postgresql:\/\/\/course_quality"\n/' "start.sh"
+    fi
     chmod +x start.sh
     echo "Переменная окружения добавлена в start.sh"
 fi
@@ -183,9 +245,15 @@ fi
 echo 'DB_DSN="postgresql:///course_quality"' > .env
 echo "Создан файл .env с переменной окружения"
 
+# Добавление переменной в streamlit/.config
+mkdir -p ~/.streamlit
+echo '[general]' > ~/.streamlit/config.toml
+echo 'DB_DSN = "postgresql:///course_quality"' >> ~/.streamlit/config.toml
+echo "Настроен файл конфигурации Streamlit"
+
 echo "-----------------------------------------------------"
 echo "  Импорт данных завершен успешно!"
 echo "-----------------------------------------------------"
-echo "Теперь перезапустите приложение со следующими командами:"
+echo "Для запуска приложения выполните:"
 echo "export DB_DSN=\"postgresql:///course_quality\""
 echo "cd ~/app && ./start.sh"
