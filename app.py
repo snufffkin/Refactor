@@ -191,6 +191,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ---------------- FUNCTIONS ------------------------------------------------------- #
+
 # Функция для навигации между страницами без перезагрузки
 def navigate_to(page, update_url=True, **params):
     """
