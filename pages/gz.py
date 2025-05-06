@@ -21,28 +21,35 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
     """Страница группы заданий с детализацией по карточкам"""
     # Фильтруем данные по выбранной программе, модулю, уроку и группе заданий
     df_gz = core.apply_filters(df, ["program", "module", "lesson", "gz"])
-    program_filter = st.session_state.get('filter_program')
-    module_filter = st.session_state.get('filter_module')
-    lesson_filter = st.session_state.get('filter_lesson')
-    gz_filter = st.session_state.get('filter_gz')
+    prog_name = st.session_state.get('filter_program')
+    module_name = st.session_state.get('filter_module')
+    lesson_name = st.session_state.get('filter_lesson')
+    gz_name = st.session_state.get('filter_gz')
     
-    # Создаем иерархический заголовок
-    create_hierarchical_header(
-        levels=["program", "module", "lesson", "gz"],
-        values=[program_filter, module_filter, lesson_filter, gz_filter]
-    )
-    
-    # Проверка наличия данных после фильтрации
     if df_gz.empty:
-        st.warning(f"Нет данных для группы заданий '{gz_filter}' в уроке '{lesson_filter}'")
+        st.warning(f"Нет данных для ГЗ '{gz_name}' в уроке '{lesson_name}', модуль '{module_name}', программа '{prog_name}'")
         return
     
-    # Добавляем ссылки на ГЗ
-    add_gz_links(df_gz, gz_filter)
+    # Создаем иерархический заголовок с кликабельными ссылками
+    create_hierarchical_header(
+        levels=["program", "module", "lesson", "gz"],
+        values=[prog_name, module_name, lesson_name, gz_name]
+    )
     
-    # 1. Отображаем общие метрики группы заданий
+    # 1. Метрики группы заданий
     st.subheader("📈 Метрики группы заданий")
-    display_metrics_row(df_gz, compare_with=df)
+    df_lesson = df[(df["program"] == prog_name) & (df["module"] == module_name) & (df["lesson"] == lesson_name)]
+    display_metrics_row(df_gz, compare_with=df_lesson)
+    
+    # Добавляем метрику суммарного времени на ГЗ
+    total_time = df_gz["time_median"].sum()
+    total_time = total_time / 60
+    # Отображаем метрику времени
+    st.subheader("⏱️ Суммарное время на ГЗ")
+    st.metric(
+        label="Суммарное время на группу заданий (мин)",
+        value=f"{total_time:.1f}"
+    )
     
     # 2. Отображаем распределение риска и статусы
     col1, col2 = st.columns(2)

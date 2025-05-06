@@ -19,7 +19,10 @@ from core_config import get_config
 # ---------------- DB ------------------------------------------------------- #
 
 def get_engine():
-    dsn = os.getenv("DB_DSN", "postgresql:///course_quality")
+    # Строка подключения к удаленной базе данных в Яндекс.Облаке
+    cloud_dsn = "postgresql://romannikitin:changeme123@rc1b-fkbqfy1dg88d0134.mdb.yandexcloud.net:6432/course_quality?sslmode=verify-full&sslrootcert=/Users/romannikitin/.postgresql/root.crt"
+    # Используем переменную окружения, если она задана, иначе используем строку подключения к облаку
+    dsn = os.getenv("DB_DSN", cloud_dsn)
     return create_engine(dsn, future=True)
 
 @st.cache_data(ttl=3600)  # Кэширование на 1 час (3600 секунд)
@@ -40,6 +43,7 @@ def load_raw_data(_engine):
                gz,gz_id,card_id,card_type,card_url,
                total_attempts,attempted_share,success_rate,first_try_success_rate,
                complaint_rate,complaints_total,discrimination_avg,success_attempts_rate,
+               time_median,complaints_text,
                status,updated_at
         FROM cards_mv
         """

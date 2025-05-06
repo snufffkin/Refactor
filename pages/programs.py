@@ -36,6 +36,20 @@ def page_programs(df: pd.DataFrame):
     st.subheader("📈 Метрики программы")
     display_metrics_row(df_prog, compare_with=df)
     
+    # Добавляем метрику среднего суммарного времени на урок
+    lessons_data = df_prog.groupby("lesson").agg(
+        total_time_median=("time_median", "sum")
+    ).reset_index()
+    
+    avg_time_per_lesson = lessons_data["total_time_median"].mean() if not lessons_data.empty else 0
+    avg_time_per_lesson = avg_time_per_lesson / 60
+    # Отображаем метрику времени
+    st.subheader("⏱️ Среднее время на урок")
+    st.metric(
+        label="Среднее суммарное время на урок (мин)",
+        value=f"{avg_time_per_lesson:.1f}"
+    )
+    
     # 2. Отображаем распределение риска и статусы
     col1, col2 = st.columns(2)
     

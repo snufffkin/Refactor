@@ -19,24 +19,35 @@ def page_lessons(df: pd.DataFrame):
     """Страница урока с детализацией по группам заданий"""
     # Фильтруем данные по выбранной программе, модулю и уроку
     df_lesson = core.apply_filters(df, ["program", "module", "lesson"])
-    program_filter = st.session_state.get('filter_program')
-    module_filter = st.session_state.get('filter_module')
-    lesson_filter = st.session_state.get('filter_lesson')
+    prog_name = st.session_state.get('filter_program')
+    module_name = st.session_state.get('filter_module')
+    lesson_name = st.session_state.get('filter_lesson')
     
-    # Создаем иерархический заголовок
-    create_hierarchical_header(
-        levels=["program", "module", "lesson"],
-        values=[program_filter, module_filter, lesson_filter]
-    )
-    
-    # Проверка наличия данных после фильтрации
     if df_lesson.empty:
-        st.warning(f"Нет данных для урока '{lesson_filter}' в модуле '{module_filter}'")
+        st.warning(f"Нет данных для урока '{lesson_name}' в модуле '{module_name}', программа '{prog_name}'")
         return
     
-    # 1. Отображаем общие метрики урока
+    # Создаем иерархический заголовок с кликабельными ссылками
+    create_hierarchical_header(
+        levels=["program", "module", "lesson"],
+        values=[prog_name, module_name, lesson_name]
+    )
+    
+    # 1. Метрики урока
     st.subheader("📈 Метрики урока")
-    display_metrics_row(df_lesson, compare_with=df)
+    df_module = df[(df["program"] == prog_name) & (df["module"] == module_name)]
+    display_metrics_row(df_lesson, compare_with=df_module)
+    
+    # Добавляем метрику суммарного времени на урок
+    total_time = df_lesson["time_median"].sum()
+    total_time = total_time / 60
+    
+    # Отображаем метрику времени
+    st.subheader("⏱️ Суммарное время на урок")
+    st.metric(
+        label="Суммарное время на урок (мин)",
+        value=f"{total_time:.1f}"
+    )
     
     # 2. Отображаем распределение риска и статусы
     col1, col2 = st.columns(2)
@@ -210,7 +221,7 @@ def page_lessons(df: pd.DataFrame):
 
     # Загружаем отзывы из БД
     engine = core.get_engine()
-    query = f"SELECT * FROM teacher_reviews WHERE program = '{program_filter}' AND module = '{module_filter}' AND lesson = '{lesson_filter}'"
+    query = f"SELECT * FROM teacher_reviews WHERE program = '{prog_name}' AND module = '{module_name}' AND lesson = '{lesson_name}'"
     df_reviews = pd.read_sql(query, engine)
 
     if df_reviews.empty:

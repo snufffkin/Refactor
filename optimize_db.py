@@ -33,6 +33,7 @@ def optimize_db():
                 m.total_attempts, m.attempted_share, m.success_rate,
                 m.first_try_success_rate, m.complaint_rate, m.complaints_total,
                 m.discrimination_avg, m.success_attempts_rate,
+                m.time_median, m.complaints_text,
                 COALESCE(st.status,'new') AS status, st.updated_at
             FROM cards_structure s
             JOIN cards_metrics m USING(card_id)
@@ -94,6 +95,8 @@ def optimize_db():
                 AVG(attempted_share) AS avg_attempted_share,
                 AVG(discrimination_avg) AS avg_discrimination,
                 SUM(total_attempts) AS total_attempts_sum,
+                AVG(time_median) AS avg_time_median,
+                SUM(time_median) AS total_time_median,
                 COUNT(DISTINCT module) AS module_count,
                 COUNT(DISTINCT lesson) AS lesson_count,
                 COUNT(DISTINCT gz) AS gz_count,
@@ -127,6 +130,8 @@ def optimize_db():
                 AVG(attempted_share) AS avg_attempted_share,
                 AVG(discrimination_avg) AS avg_discrimination,
                 SUM(total_attempts) AS total_attempts_sum,
+                AVG(time_median) AS avg_time_median,
+                SUM(time_median) AS total_time_median,
                 COUNT(DISTINCT lesson) AS lesson_count,
                 COUNT(DISTINCT gz) AS gz_count,
                 MAX(updated_at) AS last_updated
@@ -176,6 +181,8 @@ def optimize_db():
                 AVG(attempted_share) AS avg_attempted_share,
                 AVG(discrimination_avg) AS avg_discrimination,
                 SUM(total_attempts) AS total_attempts_sum,
+                AVG(time_median) AS avg_time_median,
+                SUM(time_median) AS total_time_median,
                 COUNT(DISTINCT gz) AS gz_count,
                 MAX(updated_at) AS last_updated
             FROM mv_cards_mv
@@ -232,6 +239,8 @@ def optimize_db():
                 AVG(attempted_share) AS avg_attempted_share,
                 AVG(discrimination_avg) AS avg_discrimination,
                 SUM(total_attempts) AS total_attempts_sum,
+                AVG(time_median) AS avg_time_median,
+                SUM(time_median) AS total_time_median,
                 COUNT(DISTINCT card_type) AS card_type_count,
                 MAX(updated_at) AS last_updated
             FROM mv_cards_mv
