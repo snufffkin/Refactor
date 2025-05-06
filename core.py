@@ -51,13 +51,15 @@ def load_raw_data(_engine):
     return pd.read_sql(sql, _engine)
 
 @st.cache_data(ttl=300)  # Кэширование на 5 минут (300 секунд)
-def process_data(raw_data):
+def process_data(raw_data, use_parallel=False, max_workers=4):
     """
     Обрабатывает сырые данные, добавляя вычисляемые метрики.
     Функция кэшируется с коротким TTL для обновления обработанных данных.
     
     Args:
         raw_data: DataFrame с сырыми данными из load_raw_data
+        use_parallel: Использовать ли параллельную обработку для больших объемов данных
+        max_workers: Количество параллельных потоков для обработки
         
     Returns:
         DataFrame с обработанными данными и дополнительными метриками
@@ -65,22 +67,70 @@ def process_data(raw_data):
     # Копируем данные, чтобы не модифицировать оригинал
     df = raw_data.copy()
     
-    # Вычисляем риск для всего DataFrame векторизованно
-    df['risk'] = calculate_risk_score(df)
+    if use_parallel and len(df) > 100:  # Используем параллельную обработку только для больших датасетов
+        # Вычисляем риск с использованием параллельной обработки
+        df['risk'] = parallel_process_data(df, calculate_risk_score, max_workers)
+    else:
+        # Вычисляем риск для всего DataFrame векторизованно
+        df['risk'] = calculate_risk_score(df)
     
     return df
 
+def parallel_process_data(df, process_func, max_workers=4, chunk_size=None):
+    """
+    Обрабатывает большие объемы данных параллельно по чанкам.
+    
+    Args:
+        df: DataFrame для обработки
+        process_func: Функция, которая будет применена к каждому чанку
+        max_workers: Количество параллельных потоков для обработки
+        chunk_size: Размер чанка для обработки (если None, определяется автоматически)
+        
+    Returns:
+        Series с результатами обработки
+    """
+    # Определяем оптимальный размер чанка, если не указан
+    if chunk_size is None:
+        # Используем от 100 до 1000 строк в чанке в зависимости от размера DataFrame
+        chunk_size = max(100, min(1000, len(df) // max_workers))
+    
+    # Определяем функцию для обработки одного чанка
+    def process_chunk(chunk):
+        return process_func(chunk)
+    
+    # Создаем чанки DataFrame для параллельной обработки
+    chunks = [df[i:i + chunk_size] for i in range(0, len(df), chunk_size)]
+    result_series = pd.Series(index=df.index)
+    
+    # Обрабатываем чанки параллельно
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Запускаем процессинг параллельно для каждого чанка
+        chunk_results = list(executor.map(process_chunk, chunks))
+        
+        # Объединяем результаты
+        result_index = 0
+        for i, chunk_result in enumerate(chunk_results):
+            chunk_len = len(chunks[i])
+            chunk_indices = df.index[result_index:result_index + chunk_len]
+            result_series.loc[chunk_indices] = chunk_result.values
+            result_index += chunk_len
+    
+    return result_series
+
 # Для обратной совместимости
-def load_data(_engine):
+def load_data(_engine, max_workers=4):
     """
     Загружает и обрабатывает данные (устаревшая функция для обратной совместимости).
     Рекомендуется использовать комбинацию load_raw_data и process_data.
     
     Args:
         _engine: SQLAlchemy engine для подключения к БД (не хешируемый параметр)
+        max_workers: Количество параллельных потоков для обработки (если больше 1, используется параллельная обработка)
     """
     raw_data = load_raw_data(_engine)
-    return process_data(raw_data)
+    # Используем параллельную обработку, если указано больше 1 потока
+    use_parallel = max_workers > 1
+    return process_data(raw_data, use_parallel=use_parallel, max_workers=max_workers)
 
 # ---------------- Filters / Risk ------------------------------------------ #
 
@@ -1003,7 +1053,7 @@ def execute_in_parallel(functions_with_args, max_workers=4):
     return results
 
 @st.cache_data(ttl=1800)
-def load_data_parallel(program=None, module=None, lesson=None, gz=None, _engine=None):
+def load_data_parallel(program=None, module=None, lesson=None, gz=None, _engine=None, max_workers=4):
     """
     Загружает несколько наборов данных параллельно в зависимости от уровня навигации.
     
@@ -1013,6 +1063,7 @@ def load_data_parallel(program=None, module=None, lesson=None, gz=None, _engine=
         lesson: Название урока для фильтрации
         gz: Название группы заданий для фильтрации
         _engine: SQLAlchemy engine для подключения к БД
+        max_workers: Максимальное количество параллельных рабочих потоков
         
     Returns:
         dict: Словарь с различными наборами данных
@@ -1055,12 +1106,12 @@ def load_data_parallel(program=None, module=None, lesson=None, gz=None, _engine=
         ]
     
     # Выполняем функции параллельно
-    return execute_in_parallel(functions_with_args)
+    return execute_in_parallel(functions_with_args, max_workers=max_workers)
 
 # ------------------ Объединенная функция загрузки данных --------------------- #
 
 @st.cache_data(ttl=3600)
-def load_all_data_for_level(level="overview", program=None, module=None, lesson=None, gz=None, _engine=None):
+def load_all_data_for_level(level="overview", program=None, module=None, lesson=None, gz=None, _engine=None, max_workers=4):
     """
     Загружает все необходимые данные для указанного уровня навигации, используя параллельную загрузку.
     
@@ -1071,6 +1122,7 @@ def load_all_data_for_level(level="overview", program=None, module=None, lesson=
         lesson: Название урока для фильтрации
         gz: Название группы заданий для фильтрации
         _engine: SQLAlchemy engine для подключения к БД
+        max_workers: Максимальное количество параллельных рабочих потоков
         
     Returns:
         dict: Словарь с различными наборами данных для указанного уровня
@@ -1082,33 +1134,33 @@ def load_all_data_for_level(level="overview", program=None, module=None, lesson=
     
     # Загружаем базовые данные для уровня
     if level == "overview":
-        parallel_data = load_data_parallel(_engine=_engine)
+        parallel_data = load_data_parallel(_engine=_engine, max_workers=max_workers)
         result["programs"] = parallel_data.get("load_program_data", pd.DataFrame())
         result["modules"] = parallel_data.get("load_module_data", pd.DataFrame())
     
     elif level == "program" and program:
-        parallel_data = load_data_parallel(program=program, _engine=_engine)
+        parallel_data = load_data_parallel(program=program, _engine=_engine, max_workers=max_workers)
         result["modules"] = parallel_data.get("load_module_data", pd.DataFrame())
         result["lessons"] = parallel_data.get("load_lesson_data", pd.DataFrame())
         result["program_data"] = load_program_data(_engine=_engine)
         result["program_data"] = result["program_data"][result["program_data"]["program"] == program]
     
     elif level == "module" and module:
-        parallel_data = load_data_parallel(program=program, module=module, _engine=_engine)
+        parallel_data = load_data_parallel(program=program, module=module, _engine=_engine, max_workers=max_workers)
         result["lessons"] = parallel_data.get("load_lesson_data", pd.DataFrame())
         result["gz_list"] = parallel_data.get("load_gz_data", pd.DataFrame())
         result["module_data"] = load_module_data(program=program, _engine=_engine)
         result["module_data"] = result["module_data"][result["module_data"]["module"] == module]
     
     elif level == "lesson" and lesson:
-        parallel_data = load_data_parallel(program=program, module=module, lesson=lesson, _engine=_engine)
+        parallel_data = load_data_parallel(program=program, module=module, lesson=lesson, _engine=_engine, max_workers=max_workers)
         result["gz_list"] = parallel_data.get("load_gz_data", pd.DataFrame())
         result["cards"] = parallel_data.get("load_card_data", pd.DataFrame())
         result["lesson_data"] = load_lesson_data(program=program, module=module, _engine=_engine)
         result["lesson_data"] = result["lesson_data"][result["lesson_data"]["lesson"] == lesson]
     
     elif level == "gz" and gz:
-        parallel_data = load_data_parallel(program=program, module=module, lesson=lesson, gz=gz, _engine=_engine)
+        parallel_data = load_data_parallel(program=program, module=module, lesson=lesson, gz=gz, _engine=_engine, max_workers=max_workers)
         result["cards"] = parallel_data.get("load_card_data", pd.DataFrame())
         result["top_cards"] = parallel_data.get("load_top_cards_by_risk", pd.DataFrame())
         result["gz_data"] = load_gz_data(program=program, module=module, lesson=lesson, _engine=_engine)

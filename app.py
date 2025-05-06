@@ -13,6 +13,7 @@ import os
 import shutil
 import pandas as pd
 import auth
+import multiprocessing
 
 auth.init_auth()
 
@@ -22,6 +23,11 @@ import pages.my_tasks
 import pages.methodist_admin
 import pages.refactor_planning
 import navigation_utils
+
+# Определяем оптимальное количество потоков для системы
+# Используем максимальное доступное количество CPU или 8, что меньше
+MAX_WORKERS = min(multiprocessing.cpu_count(), 8)
+print(f"Using {MAX_WORKERS} worker threads for parallel operations")
 
 # Настройка страницы
 st.set_page_config(
@@ -382,7 +388,8 @@ def load_app_data(_engine, current_page):
         "module": module,
         "lesson": lesson,
         "gz": gz,
-        "_engine": _engine
+        "_engine": _engine,
+        "max_workers": MAX_WORKERS  # Передаем максимальное количество воркеров
     }
     
     # Если это страница карточки, добавляем card_id в результат,
@@ -400,7 +407,14 @@ def load_app_data(_engine, current_page):
     # Всегда загружаем и обрабатываем данные для навигации и фильтров
     # Это нужно для корректной работы sidebar_filters
     navigation_raw_data = core.load_raw_data(_engine)
-    navigation_data = core.process_data(navigation_raw_data)
+    
+    # Используем параллельную обработку для больших объемов данных навигации
+    navigation_data = core.process_data(
+        navigation_raw_data, 
+        use_parallel=True, 
+        max_workers=MAX_WORKERS
+    )
+    
     result["navigation_data"] = navigation_data
     
     # Для обратной совместимости - если страница ожидает полный датасет
