@@ -573,11 +573,19 @@ def display_complaints_analysis(card_data):
     # Отображаем текст жалоб, если он доступен
     if pd.notna(card_data.get("complaints_text")) and card_data["complaints_text"]:
         st.subheader("📝 Тексты жалоб")
-        st.markdown(f"""
-        ```
-        {card_data["complaints_text"]}
-        ```
-        """)
+        
+        # Разделяем текст жалоб по строкам
+        complaints_list = card_data["complaints_text"].strip().split('\n')
+        
+        # Отображаем каждую жалобу в отдельной карточке
+        for i, complaint in enumerate(complaints_list):
+            complaint = complaint.strip()
+            if complaint:  # Проверяем, что строка не пустая
+                st.markdown(f"""
+                <div style="border:1px solid #d33682; border-radius:8px; padding:15px; margin-bottom:15px; background-color:#fdf6e3; color:#333333; font-size:16px;">
+                    {complaint}
+                </div>
+                """, unsafe_allow_html=True)
 
 def display_discrimination_analysis(card_data):
     """
