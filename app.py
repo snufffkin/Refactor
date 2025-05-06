@@ -621,8 +621,8 @@ def use_navigation_utils_forward():
     return False
 
 # ---------------------- sidebar & navigation ------------------------------ #
-# Добавляем навигационную панель с кнопками назад/вперед
-col1, col2, col3, col4 = st.sidebar.columns([1, 1, 3, 1])
+# Добавляем навигационную панель с кнопками назад/вперед/домой
+col1, col2, col3 = st.sidebar.columns([1, 1, 1])
 
 with col1:
     if st.button("⬅️", help="Назад", key="btn_back"):
@@ -651,21 +651,7 @@ with col2:
             st.warning("Нет доступных переходов вперед", icon="⚠️")
 
 with col3:
-    st.markdown(f"**{current_page}**", unsafe_allow_html=True)
-
-with col4:
-    if st.button("🔄", help="Обновить данные", key="btn_refresh"):
-        # Очищаем кэш данных для текущей страницы
-        if f"data_cache_{current_page}" in st.session_state:
-            del st.session_state[f"data_cache_{current_page}"]
-        st.rerun()
-
-# Добавляем кнопки навигации в сайдбар
-st.sidebar.markdown("### Навигация")
-nav_cols = st.sidebar.columns(2)
-
-with nav_cols[0]:
-    if st.button("📊 Обзор", key="nav_overview"):
+    if st.button("🏠", help="Домой", key="btn_home"):
         # Сначала добавляем текущую страницу в историю
         current = st.session_state.get("current_page")
         if current and current != "Обзор":
@@ -678,82 +664,6 @@ with nav_cols[0]:
         st.query_params = {"page": "overview"}
         # Добавляем параметры в историю навигации navigation_utils
         navigation_utils.add_to_history({"page": "overview"})
-        st.rerun()
-        
-    if st.button("📚 Модули", key="nav_modules"):
-        # Сначала добавляем текущую страницу в историю
-        current = st.session_state.get("current_page")
-        if current and current != "Модули":
-            if "nav_history" not in st.session_state:
-                st.session_state.nav_history = []
-            st.session_state.nav_history.append(current)
-        
-        # Устанавливаем новую страницу
-        st.session_state.current_page = "Модули"
-        st.query_params = {"page": "modules"}
-        # Добавляем параметры в историю навигации navigation_utils
-        navigation_utils.add_to_history({"page": "modules"})
-        st.rerun()
-        
-    if st.button("🧩 ГЗ", key="nav_gz"):
-        # Сначала добавляем текущую страницу в историю
-        current = st.session_state.get("current_page")
-        if current and current != "ГЗ":
-            if "nav_history" not in st.session_state:
-                st.session_state.nav_history = []
-            st.session_state.nav_history.append(current)
-        
-        # Устанавливаем новую страницу
-        st.session_state.current_page = "ГЗ"
-        st.query_params = {"page": "gz"}
-        # Добавляем параметры в историю навигации navigation_utils
-        navigation_utils.add_to_history({"page": "gz"})
-        st.rerun()
-
-with nav_cols[1]:
-    if st.button("🏫 Программы", key="nav_programs"):
-        # Сначала добавляем текущую страницу в историю
-        current = st.session_state.get("current_page")
-        if current and current != "Программы":
-            if "nav_history" not in st.session_state:
-                st.session_state.nav_history = []
-            st.session_state.nav_history.append(current)
-        
-        # Устанавливаем новую страницу
-        st.session_state.current_page = "Программы"
-        st.query_params = {"page": "programs"}
-        # Добавляем параметры в историю навигации navigation_utils
-        navigation_utils.add_to_history({"page": "programs"})
-        st.rerun()
-        
-    if st.button("📝 Уроки", key="nav_lessons"):
-        # Сначала добавляем текущую страницу в историю
-        current = st.session_state.get("current_page")
-        if current and current != "Уроки":
-            if "nav_history" not in st.session_state:
-                st.session_state.nav_history = []
-            st.session_state.nav_history.append(current)
-        
-        # Устанавливаем новую страницу
-        st.session_state.current_page = "Уроки"
-        st.query_params = {"page": "lessons"}
-        # Добавляем параметры в историю навигации navigation_utils
-        navigation_utils.add_to_history({"page": "lessons"})
-        st.rerun()
-        
-    if st.button("🃏 Карточки", key="nav_cards"):
-        # Сначала добавляем текущую страницу в историю
-        current = st.session_state.get("current_page")
-        if current and current != "Карточки":
-            if "nav_history" not in st.session_state:
-                st.session_state.nav_history = []
-            st.session_state.nav_history.append(current)
-        
-        # Устанавливаем новую страницу
-        st.session_state.current_page = "Карточки"
-        st.query_params = {"page": "cards"}
-        # Добавляем параметры в историю навигации navigation_utils
-        navigation_utils.add_to_history({"page": "cards"})
         st.rerun()
 
 # Получаем данные для фильтров
