@@ -1,0 +1,5 @@
+199936,https://education.yandex.ru/classroom/public-lesson/71397270/run/6/,'ImageDraw' object has no attribute 'textsize'
+193527,https://education.yandex.ru/classroom/public-lesson/24479908/run/3/,'ImageDraw' object has no attribute 'textsize'
+199939,https://education.yandex.ru/classroom/public-lesson/71472374/run/8/,'ImageDraw' object has no attribute 'textsize'
+231992,https://education.yandex.ru/classroom/public-lesson/71554268/run/2/,Page.goto: Connection closed while reading from the driver
+231992,https://education.yandex.ru/classroom/public-lesson/71554268/run/2/,Page.goto: Connection closed while reading from the driver
