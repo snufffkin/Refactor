@@ -60,7 +60,7 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
     with col2:
         display_status_chart(df_gz)
     
-    # 3. Визуализируем карточки в виде столбчатой диаграммы
+    # 3. Подготовка данных для визуализации
     st.subheader("📊 Карточки в группе заданий")
     
     # Проверяем наличие колонки trickiness_level
@@ -70,19 +70,73 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
     # Добавляем разницу между общей успешностью и успехом с первой попытки
     df_gz["success_diff"] = df_gz["success_rate"] - df_gz["first_try_success_rate"]
     
-    # Сортируем по риску для лучшей визуализации
-    df_cards = df_gz.copy().sort_values("risk", ascending=False).reset_index(drop=True)
-    df_cards["card_num"] = df_cards.index + 1  # Перенумеруем после сортировки
+    # Копируем данные для дальнейшей обработки
+    df_cards = df_gz.copy()
     
-    # Создаем столбчатую диаграмму риска по карточкам
-    display_cards_chart(
+    # Обработка card_order
+    if "card_order" in df_cards.columns:
+        # Убедимся, что card_order это число
+        df_cards["card_order"] = pd.to_numeric(df_cards["card_order"], errors='coerce')
+        # Заполним пропущенные значения
+        if df_cards["card_order"].isna().any():
+            # Если card_order отсутствует или NULL, используем порядковый номер строки + 1
+            df_cards.loc[df_cards["card_order"].isna(), "card_order"] = df_cards.index[df_cards["card_order"].isna()] + 1
+    else:
+        # Если колонки нет в данных, создаем её на основе порядкового номера в группе заданий
+        df_cards["card_order"] = range(1, len(df_cards) + 1)
+    
+    # Преобразуем card_order в целые числа для корректного отображения
+    df_cards["card_order"] = df_cards["card_order"].astype(int)
+    
+    # Сортируем данные по номеру карточки
+    df_cards = df_cards.sort_values("card_order").reset_index(drop=True)
+    
+    # Создаем столбчатую диаграмму риска по карточкам напрямую через Plotly
+    st.subheader("📊 Уровень риска по карточкам")
+    
+    # Создаем график с помощью Plotly Express
+    fig = px.bar(
         df_cards,
-        x_col="card_num",
-        y_cols="risk",
+        x="card_order",
+        y="risk",
+        color="risk",
+        color_continuous_scale="RdYlGn_r",
+        labels={
+            "card_order": "Номер карточки", 
+            "risk": "Риск"
+        },
         title="Уровень риска по карточкам",
-        sort_by="risk",
-        ascending=False
+        hover_data=["card_id", "card_type", "card_order"]
     )
+    
+    # Форматируем подсказки
+    fig.update_traces(
+        hovertemplate="<b>ID: %{customdata[0]}</b><br>" +
+                      "Номер: %{customdata[2]}<br>" +
+                      "Тип: %{customdata[1]}<br>" +
+                      "Риск: %{y:.2f}"
+    )
+    
+    # Настраиваем оси X - фиксируем порядок и значения
+    fig.update_layout(
+        xaxis=dict(
+            title="Номер карточки",
+            tickmode='array',
+            tickvals=df_cards["card_order"],
+            ticktext=df_cards["card_order"],
+            tickangle=0,
+            categoryorder='array',
+            categoryarray=df_cards["card_order"].tolist()
+        ),
+        yaxis_title="Уровень риска",
+        hoverlabel=dict(
+            bgcolor="white",
+            font_size=12
+        )
+    )
+    
+    # Отображаем график
+    st.plotly_chart(fig, use_container_width=True)
     
     # 4. Детальное сравнение карточек (используя компоненты из прежней страницы cards)
     st.subheader("📊 Детальное сравнение карточек")
@@ -98,20 +152,81 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
     
     with tabs[0]:
         # График сравнения нескольких метрик для карточек
-        display_cards_chart(
-            df_cards,
-            x_col="card_num",
-            y_cols=["success_rate", "first_try_success_rate", "complaint_rate"],
-            title="Сравнение ключевых метрик по карточкам",
+        # Создаем график с несколькими метриками напрямую через Plotly
+        fig = go.Figure()
+        
+        # Определяем цвета для метрик
+        color_map = {
+            "success_rate": "#4da6ff",
+            "first_try_success_rate": "#ff9040",
+            "complaint_rate": "#ff6666"
+        }
+        
+        # Названия метрик
+        metric_labels = {
+            "success_rate": "Успешность",
+            "first_try_success_rate": "Успех с 1-й попытки",
+            "complaint_rate": "Жалобы"
+        }
+        
+        # Метрики для отображения
+        metrics = ["success_rate", "first_try_success_rate", "complaint_rate"]
+        
+        # Добавляем столбцы для каждой метрики
+        for i, col in enumerate(metrics):
+            # Определяем формат значений
+            hover_format = ":.1%" if col in ["success_rate", "first_try_success_rate", "complaint_rate"] else ":.2f"
+            
+            # Создаем текст подсказки
+            hovertemplate = (
+                f"<b>ID: {{customdata[0]}}</b><br>" +
+                f"Номер: {{customdata[2]}}<br>" +
+                f"Тип: {{customdata[1]}}<br>" +
+                f"{metric_labels[col]}: {{{{'y{hover_format}'}}}}"
+            )
+            
+            fig.add_trace(go.Bar(
+                x=df_cards["card_order"],
+                y=df_cards[col],
+                name=metric_labels[col],
+                marker_color=color_map[col],
+                customdata=df_cards[["card_id", "card_type", "card_order"]],
+                hovertemplate=hovertemplate
+            ))
+        
+        # Настройка группировки столбцов
+        fig.update_layout(
             barmode="group",
-            color_discrete_sequence=["#4da6ff", "#ff9040", "#ff6666"]
+            title="Сравнение ключевых метрик по карточкам",
+            xaxis=dict(
+                title="Номер карточки",
+                tickmode='array',
+                tickvals=df_cards["card_order"],
+                ticktext=df_cards["card_order"],
+                tickangle=0,
+                categoryorder='array',
+                categoryarray=df_cards["card_order"].tolist()
+            ),
+            yaxis=dict(
+                title="Значение",
+                tickformat=".0%"
+            ),
+            hoverlabel=dict(
+                bgcolor="white",
+                font_size=12
+            ),
+            legend_title="Метрики"
         )
+        
+        # Отображаем график
+        st.plotly_chart(fig, use_container_width=True)
     
     with tabs[1]:
         # График зависимости успешности и жалоб
         # Заменяем NaN в total_attempts на 0 для параметра size
-        scatter_df = df_gz.copy()
+        scatter_df = df_cards.copy()
         scatter_df['total_attempts'] = scatter_df['total_attempts'].fillna(0)
+        
         fig = px.scatter(
             scatter_df,
             x="success_rate",
@@ -133,7 +248,8 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
                 "risk": ":.2f",
                 "discrimination_avg": ":.2f",
                 "card_type": True,
-                "total_attempts": True
+                "total_attempts": True,
+                "card_order": True
             }
         )
         
@@ -275,20 +391,20 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
                 
                 st.plotly_chart(fig, use_container_width=True)
             
-            # Отображаем график подлости карточек
-            display_trickiness_chart(df_gz, x_col="card_id", limit=50, title="Уровень подлости карточек")
+            # Отображаем график подлости карточек с использованием card_order
+            display_trickiness_chart(df_gz, x_col="card_order", limit=50, title="Уровень подлости карточек")
             
             # Отображаем диаграмму рассеяния для трики-карточек
             display_trickiness_success_chart(df_gz, limit=50)
             
             # Отображаем таблицу с трики-карточками
-            tricky_cards = df_gz[df_gz["trickiness_level"] > 0].sort_values("trickiness_level", ascending=False)
+            tricky_cards = df_cards[df_cards["trickiness_level"] > 0].sort_values("card_order")
             
             if not tricky_cards.empty:
                 st.markdown("#### Список трики-карточек")
                 
                 # Создаем таблицу с данными трики-карточек
-                tricky_table = tricky_cards[["card_id", "card_type", "success_rate", "first_try_success_rate", "success_diff", "risk", "trickiness_level"]]
+                tricky_table = tricky_cards[["card_id", "card_type", "success_rate", "first_try_success_rate", "success_diff", "risk", "trickiness_level", "card_order"]]
                 
                 # Добавляем колонку с уровнем подлости
                 tricky_table["Уровень подлости"] = tricky_table["trickiness_level"].map({
@@ -301,13 +417,14 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
                 display_df = pd.DataFrame()
                 display_df["ID карточки"] = tricky_table["card_id"]
                 display_df["Тип"] = tricky_table["card_type"]
+                display_df["Номер"] = tricky_table["card_order"]
                 display_df["Успешность"] = tricky_table["success_rate"].apply(lambda x: f"{x:.1%}")
                 display_df["Успех с 1-й"] = tricky_table["first_try_success_rate"].apply(lambda x: f"{x:.1%}")
                 display_df["Разница"] = tricky_table["success_diff"].apply(lambda x: f"{x:.1%}")
                 display_df["Уровень подлости"] = tricky_table["Уровень подлости"]
                 display_df["Риск"] = tricky_table["risk"].apply(lambda x: f"{x:.2f}")
                 
-                # Отображаем таблицу без столбцов 'Действия' и 'Редактор'
+                # Отображаем таблицу
                 st.dataframe(display_df, hide_index=True, use_container_width=True)
                 # Кнопки для перехода к детальному анализу трики-карточек
                 for _, row in tricky_cards.iterrows():
@@ -323,16 +440,16 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
         # Анализ дискриминативности карточек
         st.markdown("### Анализ дискриминативности карточек")
         
-        # Создаем график дискриминативности
+        # Создаем график дискриминативности используя card_order
         fig = px.bar(
             df_cards,
-            x="card_num",
+            x="card_order",
             y="discrimination_avg",
             color="success_rate",
             color_continuous_scale="RdYlGn",
             title="Индекс дискриминативности по карточкам",
-            labels={"card_num": "Номер карточки", "discrimination_avg": "Дискриминативность"},
-            hover_data=["card_id", "card_type"]
+            labels={"card_order": "Номер карточки", "discrimination_avg": "Дискриминативность"},
+            hover_data=["card_id", "card_type", "card_order"]
         )
         
         # Добавляем горизонтальные линии для границ категорий
@@ -340,6 +457,28 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
                       annotation_text="Хорошая", annotation_position="left")
         fig.add_hline(y=0.15, line_dash="dash", line_color="red", 
                       annotation_text="Низкая", annotation_position="left")
+        
+        # Форматируем подсказки
+        fig.update_traces(
+            hovertemplate="<b>ID: %{customdata[0]}</b><br>" +
+                          "Номер: %{customdata[2]}<br>" +
+                          "Тип: %{customdata[1]}<br>" +
+                          "Дискриминативность: %{y:.3f}<br>" +
+                          "Успешность: %{marker.color:.1%}"
+        )
+        
+        # Настраиваем оси X - показываем номера карточек
+        fig.update_layout(
+            xaxis=dict(
+                title="Номер карточки",
+                tickmode='array',
+                tickvals=df_cards["card_order"],
+                ticktext=df_cards["card_order"],
+                tickangle=0,
+                categoryorder='array',
+                categoryarray=df_cards["card_order"].tolist()
+            )
+        )
         
         st.plotly_chart(fig, use_container_width=True)
         
@@ -362,17 +501,18 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
         # Показываем карточки с низкой дискриминативностью
         if low_discr > 0:
             st.markdown("#### Карточки с низкой дискриминативностью")
-            low_discr_cards = df_gz[df_gz["discrimination_avg"] < 0.15].sort_values("discrimination_avg")
+            low_discr_cards = df_cards[df_cards["discrimination_avg"] < 0.15].sort_values("card_order")
             
             # Создаем таблицу
             display_df = pd.DataFrame()
             display_df["ID карточки"] = low_discr_cards["card_id"]
             display_df["Тип"] = low_discr_cards["card_type"]
+            display_df["Номер"] = low_discr_cards["card_order"]
             display_df["Дискриминативность"] = low_discr_cards["discrimination_avg"].apply(lambda x: f"{x:.3f}")
             display_df["Успешность"] = low_discr_cards["success_rate"].apply(lambda x: f"{x:.1%}")
             display_df["Риск"] = low_discr_cards["risk"].apply(lambda x: f"{x:.2f}")
             
-            # Отображаем таблицу без столбцов 'Действия' и 'Редактор'
+            # Отображаем таблицу
             st.dataframe(display_df, hide_index=True, use_container_width=True)
             # Кнопки для перехода к детальному анализу карточек
             for _, row in low_discr_cards.iterrows():
@@ -385,23 +525,22 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
     # 5. Таблица с карточками и ссылками на карточки
     st.subheader("📋 Детальная информация по карточкам")
     
-    # Отображаем таблицу
-    cards_df = df_gz[["card_id", "card_type", "status", "success_rate", 
+    # Отображаем таблицу, сортируя по card_order
+    cards_df = df_cards[["card_id", "card_type", "status", "success_rate", 
                       "first_try_success_rate", "complaint_rate", 
-                      "discrimination_avg", "total_attempts", "risk", "trickiness_level"]]
+                      "discrimination_avg", "total_attempts", "risk", "trickiness_level", "card_order"]]
     
-    # Добавляем номер в таблицу для соответствия с графиками
-    cards_df = cards_df.sort_values("risk", ascending=False).reset_index(drop=True)
-    cards_df["Номер"] = cards_df.index + 1
+    # Сортируем по порядку карточек
+    cards_df = cards_df.sort_values("card_order").reset_index(drop=True)
     
     # Переорганизуем колонки, чтобы номер был в начале
-    cards_df = cards_df[["Номер", "card_id", "card_type", "status", "success_rate", 
+    cards_df = cards_df[["card_order", "card_id", "card_type", "status", "success_rate", 
                          "first_try_success_rate", "complaint_rate", 
                          "discrimination_avg", "total_attempts", "risk", "trickiness_level"]]
     
     # Создаем таблицу с данными для отображения
     display_df = pd.DataFrame()
-    display_df["Номер"] = cards_df["Номер"]
+    display_df["Номер"] = cards_df["card_order"]
     display_df["ID карточки"] = cards_df["card_id"]
     display_df["Тип"] = cards_df["card_type"]
     display_df["Статус"] = cards_df["status"]
@@ -422,25 +561,27 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
     }
     display_df["Подлость"] = cards_df["trickiness_level"].map(trickiness_categories)
     
-    # Отображаем таблицу без столбцов 'Действия' и 'Редактор'
+    # Отображаем таблицу
     st.dataframe(display_df, hide_index=True, use_container_width=True)
     # Кнопки для перехода к детальному анализу карточек
     for _, row in cards_df.iterrows():
         card_id = int(row['card_id'])
-        if st.button(f"Перейти к карточке {card_id}", key=f"gz_detail_nav_{card_id}"):
+        card_order = int(row['card_order'])
+        if st.button(f"Перейти к карточке {card_id} (№{card_order})", key=f"gz_detail_nav_{card_id}"):
             # Навигация без сброса сессии
             navigation_utils.navigate_to("cards", card_id=str(card_id))
             st.rerun()
     
-    # 6. Кнопки для быстрого перехода ко всем карточкам
+    # 6. Кнопки для быстрого перехода ко всем карточкам, сортированные по card_order
     st.subheader("🔍 Все карточки в группе заданий")
-    for _, card in df_gz.sort_values("risk", ascending=False).iterrows():
+    for _, card in df_cards.sort_values("card_order").iterrows():
         card_id = int(card["card_id"])
         risk = card["risk"]
         card_type = card["card_type"]
+        card_order = int(card["card_order"])
         color = "red" if risk > 0.75 else ("orange" if risk > 0.5 else ("gold" if risk > 0.25 else "green"))
         key = f"gz_card_nav_{card_id}"
-        if st.button(f"ID: {card_id} - Риск: {risk:.2f} - {card_type}", key=key):
+        if st.button(f"№{card_order}: ID {card_id} - Риск: {risk:.2f} - {card_type}", key=key):
             navigation_utils.navigate_to("cards", card_id=str(card_id))
             st.rerun()
         # Специальные флаги
@@ -457,16 +598,17 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
             st.caption(" | ".join(special_flags))
     
     # Создаем список трики-карточек
-    tricky_cards = df_gz[df_gz["trickiness_level"] > 0].sort_values("trickiness_level", ascending=False)
+    tricky_cards = df_cards[df_cards["trickiness_level"] > 0].sort_values("card_order")
     
     if not tricky_cards.empty:
         st.markdown("### Трики-карточки")
         for _, card in tricky_cards.iterrows():
             card_id = int(card["card_id"])
             trickiness = card.get("trickiness_level", 0)
+            card_order = int(card["card_order"])
             color = "red" if trickiness == 3 else ("orange" if trickiness == 2 else "gold")
             key = f"gz_tricky_nav_list_{card_id}"
-            if st.button(f"ID: {card_id} - Подлость: {trickiness} - {card['card_type']}", key=key):
+            if st.button(f"№{card_order}: ID {card_id} - Подлость: {trickiness} - {card['card_type']}", key=key):
                 navigation_utils.navigate_to("cards", card_id=str(card_id))
                 st.rerun()
         # Отображаем оставшиеся карточки при большом числе
@@ -474,16 +616,17 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
             st.info(f"И еще {len(tricky_cards) - 12} карточек...")
     
     # Создаем список карточек с низкой дискриминативностью
-    low_discr_cards = df_gz[df_gz["discrimination_avg"] < 0.15].sort_values("discrimination_avg")
+    low_discr_cards = df_cards[df_cards["discrimination_avg"] < 0.15].sort_values("card_order")
     
     if not low_discr_cards.empty:
         st.markdown("### Карточки с низкой дискриминативностью")
         for _, card in low_discr_cards.iterrows():
             card_id = int(card["card_id"])
             discr = card["discrimination_avg"]
+            card_order = int(card["card_order"])
             color = "purple"
             key = f"gz_lowdiscr_nav_list_{card_id}"
-            if st.button(f"ID: {card_id} - Дискр.: {discr:.2f} - {card['card_type']}", key=key):
+            if st.button(f"№{card_order}: ID {card_id} - Дискр.: {discr:.2f} - {card['card_type']}", key=key):
                 navigation_utils.navigate_to("cards", card_id=str(card_id))
                 st.rerun()
         if len(low_discr_cards) > 12:

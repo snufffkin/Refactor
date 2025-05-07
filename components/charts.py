@@ -61,9 +61,14 @@ def display_cards_chart(df, x_col="card_id", y_cols=None, title=None, barmode="g
     if limit is not None and len(sorted_df) > limit:
         sorted_df = sorted_df.head(limit)
     
-    # Создаем новый столбец с порядковыми номерами
-    sorted_df = sorted_df.reset_index(drop=True)
-    sorted_df["card_num"] = sorted_df.index + 1  # Начинаем с 1 для лучшего восприятия пользователем
+    # Убедимся, что указанная колонка x_col существует
+    if x_col not in sorted_df.columns:
+        # Если колонки нет, используем индекс + 1
+        sorted_df["card_num"] = sorted_df.index + 1
+        x_display = "card_num"
+    else:
+        # Используем переданную колонку
+        x_display = x_col
     
     # Создаем график
     if len(y_cols) == 1:
@@ -80,16 +85,16 @@ def display_cards_chart(df, x_col="card_id", y_cols=None, title=None, barmode="g
         
         fig = px.bar(
             sorted_df,
-            x="card_num",
+            x=x_display,
             y=y_col,
             color=y_col,
             color_continuous_scale=color_scale,
             labels={
-                "card_num": "Номер карточки", 
+                x_display: "Номер карточки", 
                 y_col: metric_labels.get(y_col, y_col)
             },
             title=title or f"{metric_labels.get(y_col, y_col)} по карточкам",
-            hover_data=[x_col, "card_type"] + ([col for col in y_cols if col != y_col])
+            hover_data=["card_id", "card_type"] + ([col for col in y_cols if col != y_col])
         )
         
         # Форматируем подсказки
@@ -132,11 +137,11 @@ def display_cards_chart(df, x_col="card_id", y_cols=None, title=None, barmode="g
             )
             
             fig.add_trace(go.Bar(
-                x=sorted_df["card_num"],
+                x=sorted_df[x_display],
                 y=sorted_df[col],
                 name=name,
                 marker_color=color_discrete_sequence[i % len(color_discrete_sequence)],
-                customdata=sorted_df[[x_col, "card_type"]],
+                customdata=sorted_df[["card_id", "card_type"]],
                 hovertemplate=hovertemplate
             ))
         
@@ -150,13 +155,13 @@ def display_cards_chart(df, x_col="card_id", y_cols=None, title=None, barmode="g
         
         fig.update_layout(title=title)
     
-    # Настраиваем оси X - показываем порядковый номер и добавляем метку с ID карточки
+    # Настраиваем оси X - показываем значения из выбранной колонки
     fig.update_layout(
         xaxis=dict(
             title="Номер карточки",
             tickmode='array',
-            tickvals=sorted_df["card_num"],
-            ticktext=sorted_df["card_num"],
+            tickvals=sorted_df[x_display],
+            ticktext=sorted_df[x_display],
             tickangle=0
         ),
         yaxis_title="Значение",
@@ -566,16 +571,19 @@ def display_trickiness_chart(df, x_col="card_id", limit=50, title="Уровен�
         "Высокий уровень": "#ff7f7f"   # красный
     }
     
+    # Используем в качестве x либо переданное значение x_col, либо card_num
+    x_display = x_col if x_col in sorted_df.columns else "card_num"
+    
     # Создаем график
     fig = px.bar(
         sorted_df,
-        x="card_num",
+        x=x_display,
         y="trickiness_level",
         color="trickiness_category",
         color_discrete_map=color_map,
-        labels={"card_num": "Номер карточки", "trickiness_level": "Уровень подлости"},
+        labels={x_display: "Номер карточки", "trickiness_level": "Уровень подлости"},
         title=title,
-        hover_data=[x_col, "success_rate", "first_try_success_rate", "card_type"]
+        hover_data=["card_id", "success_rate", "first_try_success_rate", "card_type"]
     )
     
     # Добавляем горизонтальные линии для границ категорий
@@ -589,7 +597,7 @@ def display_trickiness_chart(df, x_col="card_id", limit=50, title="Уровен�
     # Форматируем подсказки
     fig.update_traces(
         hovertemplate="<b>ID: %{customdata[0]}</b><br>" +
-                      "Номер: %{x}<br>" +
+                      f"Номер: %{{{x_display}}}<br>" +
                       "Уровень подлости: %{y}<br>" +
                       "Категория: %{marker.color}<br>" +
                       "Общая успешность: %{customdata[1]:.1%}<br>" +
