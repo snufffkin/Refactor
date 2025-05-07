@@ -9,7 +9,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
 from sqlalchemy import text
-import yadisk
 import os
 import requests
 from urllib.parse import quote
@@ -19,129 +18,7 @@ from components.utils import create_hierarchical_header, add_gz_links, add_card_
 from components.metrics import display_metrics_row, display_status_chart, display_risk_distribution
 from components.charts import display_risk_bar_chart, display_metrics_comparison, display_success_complaints_chart
 
-# Константы для Яндекс Диска
-YADISK_TOKEN = "y0__xDy8e2YARjblgMgl_6WhRO_IK0EtVc_09fxm3Bi3u9x1_m6vQ"
-YADISK_REMOTE_DIR = "Refactor/image"
-USE_YADISK_CACHE = True  # Кешировать результаты проверки наличия файлов
-yadisk_cache = {}  # Кеш для хранения информации о файлах на Яндекс Диске
 
-def get_yadisk_client():
-    """Получает клиент Яндекс Диска"""
-    try:
-        return yadisk.YaDisk(token=YADISK_TOKEN)
-    except Exception as e:
-        st.error(f"Ошибка при инициализации клиента Яндекс Диска: {e}")
-        return None
-
-def check_yadisk_screenshot(card_id, y=None):
-    """
-    Проверяет наличие скриншота для карточки на Яндекс Диске
-    
-    Args:
-        card_id: ID карточки
-        y: Клиент Яндекс Диска (необязательно)
-        
-    Returns:
-        dict или None: Словарь с информацией о файле, если файл существует,
-                     или None, если файл не существует
-    """
-    global yadisk_cache
-    
-    # Проверяем кеш, если включено кеширование
-    if USE_YADISK_CACHE and card_id in yadisk_cache:
-        return yadisk_cache[card_id]
-    
-    # Если клиент не передан, создаем новый
-    if y is None:
-        y = get_yadisk_client()
-        if y is None:
-            return None
-    
-    # Проверяем наличие файлов с разными расширениями
-    for ext in ['jpg', 'png', 'jpeg']:
-        remote_path = f"{YADISK_REMOTE_DIR}/{card_id}.{ext}"
-        try:
-            # Проверяем существование файла
-            file_info = y.get_meta(remote_path)
-            if file_info:
-                # Сначала проверяем, есть ли у файла уже публичная ссылка
-                if not file_info.public_url:
-                    try:
-                        # Публикуем файл и получаем обновленную мета-информацию
-                        y.publish(remote_path)
-                        # Получаем обновленную информацию о файле после публикации
-                        file_info = y.get_meta(remote_path)
-                    except Exception as e:
-                        st.warning(f"Не удалось сделать файл публичным: {e}")
-                
-                # Сохраняем в кеш, если включено кеширование
-                if USE_YADISK_CACHE:
-                    yadisk_cache[card_id] = file_info
-                
-                return file_info
-        except yadisk.exceptions.PathNotFoundError:
-            # Файл не найден, продолжаем поиск с другим расширением
-            continue
-        except Exception as e:
-            st.warning(f"Ошибка при проверке скриншота для карточки {card_id}: {e}")
-            break
-    
-    # Файл не найден для всех расширений
-    if USE_YADISK_CACHE:
-        yadisk_cache[card_id] = None
-    
-    return None
-
-def display_card_screenshot(card_id):
-    """
-    Отображает скриншот карточки, если он доступен на Яндекс Диске
-    
-    Args:
-        card_id: ID карточки
-    """
-    # Инициализируем клиент Яндекс Диска
-    y = get_yadisk_client()
-    if y is None:
-        st.warning("Не удалось подключиться к Яндекс Диску.")
-        return
-    
-    # Проверяем наличие скриншота
-    file_info = check_yadisk_screenshot(card_id, y)
-    
-    if file_info:
-        # Отображаем заголовок
-        st.subheader("📸 Скриншот карточки")
-        
-        # Получаем публичную ссылку
-        public_url = getattr(file_info, 'public_url', None)
-        
-        if public_url:
-            try:
-                # Пробуем скачать содержимое файла напрямую через API Яндекс.Диска
-                import io
-                
-                # Получаем информацию о файле
-                remote_path = file_info.path
-                
-                # Скачиваем содержимое файла во временный буфер
-                file_buffer = io.BytesIO()
-                y.download(remote_path, file_buffer)
-                file_buffer.seek(0)  # Возвращаем указатель в начало буфера
-                
-                # Отображаем изображение из буфера
-                st.image(file_buffer, caption=f"Скриншот карточки {card_id}", use_container_width=True)
-                
-            except Exception as e:
-                st.warning(f"Не удалось загрузить изображение напрямую: {e}")
-                # Запасной вариант - используем публичную ссылку
-                st.image(public_url, caption=f"Скриншот карточки {card_id}", use_container_width=True)
-            
-            # Добавляем кнопку для открытия в новой вкладке
-            st.markdown(f"[🔍 Открыть в полном размере]({public_url})")
-        else:
-            st.warning("Скриншот доступен, но не имеет публичной ссылки.")
-    else:
-        st.info("📷 Скриншот для этой карточки отсутствует или недоступен.")
 
 # Функция для отображения подробной информации о карточке
 def display_card_details(card_data):
@@ -217,7 +94,6 @@ def display_card_details(card_data):
                 st.markdown(f"**{key}:** {value}")
     
     # Отображаем скриншот карточки под основной информацией
-    display_card_screenshot(int(card_data["card_id"]))
 
 def display_course_links(card_id, engine, card_df):
     """
@@ -1083,14 +959,6 @@ def page_cards(df: pd.DataFrame, eng):
         # Предварительно проверяем наличие скриншотов для всех карточек
         # и добавляем информацию в DataFrame
         card_ids = df_sorted["card_id"].unique()
-        y = get_yadisk_client()
-        
-        if y:
-            with st.spinner("Проверяем наличие скриншотов..."):
-                has_screenshot = {}
-                for card_id in card_ids[:50]:  # Ограничиваем проверку первыми 50 карточками для производительности
-                    has_screenshot[card_id] = check_yadisk_screenshot(card_id, y) is not None
-        
         # Создаем селектор карточек
         selected_card_id = st.selectbox(
             "Выберите карточку",
