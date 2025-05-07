@@ -1,6 +1,9 @@
 # Файлы с конфиденциальными данными
 db_schema.md
 get_schema.sh
+get_screenshot.py
+sync_with_db.py
+upload_to_yadisk.py
 
 # Логи и временные файлы
 *.log
