@@ -7,6 +7,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import navigation_utils
+import re
 
 def create_hierarchical_header(levels, values, emoji_map=None):
     """
@@ -71,6 +72,69 @@ def create_hierarchical_header(levels, values, emoji_map=None):
     
     # Добавляем разделитель
     st.markdown("---")
+
+def group_programs_by_class(df, column="program"):
+    """
+    Группирует программы по классам обучения (5-11) и возвращает словарь с программами по группам.
+    
+    Args:
+        df: DataFrame с данными
+        column: Название колонки с названиями программ
+        
+    Returns:
+        dict: Словарь с группами программ по классам {класс: [список программ]}
+    """
+    # Получаем уникальные названия программ
+    programs = df[column].unique()
+    
+    # Словарь для результатов
+    result = {
+        '5 класс': [],
+        '6 класс': [],
+        '7 класс': [],
+        '8 класс': [],
+        '9 класс': [],
+        '10 класс': [],
+        '11 класс': [],
+        'Другие программы': []
+    }
+    
+    # Паттерны для определения класса программы
+    class_patterns = {
+        '5 класс': r'для 5 класса',
+        '6 класс': r'для 6 класса',
+        '7 класс': r'для 7 класса',
+        '8 класс': r'для 8 класса',
+        '9 класс': r'для 9 класса',
+        '10 класс': r'для 10 класса',
+        '11 класс': r'для 11 класса'
+    }
+    
+    # Функция извлечения года из названия программы
+    def extract_year(program_name):
+        # Ищем год в формате 2023-2024 или 2022-2023
+        match = re.search(r'(\d{4})-(\d{4})', program_name)
+        if match:
+            return int(match.group(1))  # Первый год из диапазона
+        return 0  # Если год не найден
+    
+    # Распределяем программы по классам
+    for program in programs:
+        classified = False
+        for class_name, pattern in class_patterns.items():
+            if re.search(pattern, program, re.IGNORECASE):
+                result[class_name].append(program)
+                classified = True
+                break
+        
+        if not classified:
+            result['Другие программы'].append(program)
+    
+    # Сортируем программы внутри каждого класса по году (по убыванию)
+    for class_name in result:
+        result[class_name] = sorted(result[class_name], key=extract_year, reverse=True)
+    
+    return result
 
 def display_clickable_items(df, column, level, metrics=None):
     """
@@ -142,6 +206,90 @@ def display_clickable_items(df, column, level, metrics=None):
                 if "complaints" in metrics:
                     metrics_str.append(f"Compl: {row.complaints:.1%}")
                 st.markdown(" | ".join(metrics_str))
+
+def display_programs_by_class(df, column="program", metrics=None):
+    """
+    Отображает программы, сгруппированные по классам обучения
+    
+    Args:
+        df: DataFrame с данными
+        column: Колонка с названиями элементов
+        metrics: Список метрик для отображения рядом с элементом
+    """
+    import urllib.parse as ul
+    
+    # Группируем программы по классам
+    programs_by_class = group_programs_by_class(df, column)
+    
+    # Получаем метрики для каждой программы
+    if metrics:
+        agg_df = df.groupby(column).agg(
+            success=("success_rate", "mean"),
+            complaints=("complaint_rate", "mean"),
+            risk=("risk", "mean"),
+            cards=("card_id", "nunique")
+        ).reset_index()
+    else:
+        agg_df = df.groupby(column).agg(
+            cards=("card_id", "nunique")
+        ).reset_index()
+    
+    # Преобразуем в словарь для быстрого доступа
+    metrics_dict = {}
+    for _, row in agg_df.iterrows():
+        metrics_dict[row[column]] = row
+    
+    # Собираем текущие фильтры
+    current_filters = {}
+    for filter_col in ["program", "module", "lesson", "gz"]:
+        if st.session_state.get(f"filter_{filter_col}"):
+            current_filters[filter_col] = st.session_state[f"filter_{filter_col}"]
+    
+    # Перебираем классы с 5 по 11, затем "Другие программы"
+    for class_name in list(programs_by_class.keys()):
+        programs = programs_by_class[class_name]
+        
+        # Пропускаем пустые классы
+        if not programs:
+            continue
+        
+        st.subheader(class_name)
+        
+        # Разбиваем на две колонки
+        col1, col2 = st.columns(2)
+        half = len(programs) // 2 + len(programs) % 2
+        
+        for i, program in enumerate(programs):
+            current_col = col1 if i < half else col2
+            with current_col:
+                # Параметры для navigation
+                url_params = current_filters.copy()
+                url_params["program"] = program
+                
+                # Суффикс для ключа по metrics, чтобы ключи были уникальны при разных вызовах
+                metrics_suffix = "-".join(metrics) if metrics else ""
+                key = f"nav_item_program_{metrics_suffix}_{class_name}_{i}"
+                
+                if st.button(f"{program}", key=key):
+                    # Используем функцию navigate_to
+                    navigation_utils.navigate_to("programs", **url_params)
+                
+                # Показ метрик рядом с кнопкой
+                if metrics and program in metrics_dict:
+                    row = metrics_dict[program]
+                    metrics_str = []
+                    if "cards" in metrics:
+                        metrics_str.append(f"Cards: {row.cards}")
+                    if "risk" in metrics:
+                        metrics_str.append(f"Risk: {row.risk:.2f}")
+                    if "success" in metrics:
+                        metrics_str.append(f"Success: {row.success:.1%}")
+                    if "complaints" in metrics:
+                        metrics_str.append(f"Compl: {row.complaints:.1%}")
+                    st.markdown(" | ".join(metrics_str))
+        
+        # Добавляем разделитель между классами
+        st.markdown("---")
 
 def add_gz_links(df, gz_filter):
     """

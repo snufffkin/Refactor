@@ -13,6 +13,7 @@ import core
 from components.metrics import display_metrics_row, display_status_chart, display_risk_distribution
 from components.charts import display_risk_bar_chart, display_metrics_comparison, display_success_complaints_chart
 import navigation_utils
+from components.utils import display_programs_by_class
 
 def page_overview(df: pd.DataFrame):
     """Страница с обзором всех программ"""
@@ -140,9 +141,8 @@ def page_overview(df: pd.DataFrame):
         use_container_width=True
     )
     
-    # Отображаем кликабельный список программ
-    from components.utils import display_clickable_items
-    display_clickable_items(df, "program", "program", metrics=["cards", "risk", "success"])
+    # Отображаем программы, сгруппированные по классам
+    display_programs_by_class(df, "program", metrics=["cards", "risk", "success"])
     
     # 6. Дополнительная аналитика
     if st.checkbox("Показать дополнительную аналитику", value=False):
