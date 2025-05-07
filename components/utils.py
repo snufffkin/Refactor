@@ -164,6 +164,34 @@ def add_gz_links(df, gz_filter):
                 st.markdown(f"[🔗 Ссылка для редактирования](https://education.yandex-team.ru/exercise/edit/{gz_id})")
             
             with link_col2:
-                st.markdown(f"[🌐 Публичная ссылка](https://education.yandex.ru/classroom/public-lesson/{gz_id}/run/)")
+                st.markdown(f"[🌐 Публичная ссылка на ГЗ](https://education.yandex.ru/classroom/public-lesson/{gz_id}/run/)")
             
             st.markdown("---")
+
+def add_card_links(card_data):
+    """
+    Добавляет ссылки на карточку в начало страницы
+    
+    Args:
+        card_data: Series с данными карточки
+    """
+    # Проверяем наличие необходимых данных
+    if 'gz_id' in card_data and pd.notna(card_data['gz_id']):
+        gz_id = card_data['gz_id']
+        
+        # Определяем card_order (используем card_id, если card_order отсутствует)
+        card_order = card_data.get('card_order', card_data['card_id'])
+        
+        st.markdown("### Ссылки для карточки")
+        link_col1, link_col2, link_col3 = st.columns(3)
+        
+        with link_col1:
+            st.markdown(f"[🔗 Ссылка для редактирования](https://education.yandex-team.ru/exercise/edit/{gz_id})")
+        
+        with link_col2:
+            st.markdown(f"[🔗 Публичная ссылка](https://education.yandex.ru/classroom/public-lesson/{gz_id}/run/{card_order}/)")
+        
+        with link_col3:
+            st.markdown(f"[🌐 Публичная ссылка на ГЗ](https://education.yandex.ru/classroom/public-lesson/{gz_id}/run/)")
+        
+        st.markdown("---")

@@ -11,7 +11,7 @@ import numpy as np
 from sqlalchemy import text
 
 import core
-from components.utils import create_hierarchical_header, add_gz_links
+from components.utils import create_hierarchical_header, add_gz_links, add_card_links
 from components.metrics import display_metrics_row, display_status_chart, display_risk_distribution
 from components.charts import display_risk_bar_chart, display_metrics_comparison, display_success_complaints_chart
 
@@ -875,6 +875,40 @@ def display_card_status_form(card_data, engine):
             except Exception as e:
                 st.error(f"Ошибка при обновлении статуса: {str(e)}")
 
+def get_card_order(card_id, engine):
+    """
+    Получает порядковый номер карточки (card_order) из базы данных
+    
+    Args:
+        card_id: ID карточки
+        engine: SQLAlchemy engine для подключения к БД
+        
+    Returns:
+        card_order: Порядковый номер карточки или None, если не найден
+    """
+    try:
+        # Запрос для получения card_order из таблицы cards_structure
+        query = text("""
+            SELECT card_order 
+            FROM cards_structure 
+            WHERE card_id = :card_id
+        """)
+        
+        # Выполняем запрос
+        with engine.connect() as conn:
+            result = conn.execute(query, {"card_id": card_id})
+            row = result.fetchone()
+            
+            if row and row[0]:
+                return row[0]
+            
+            # Если не нашли, возвращаем None
+            return None
+    
+    except Exception as e:
+        st.error(f"Ошибка при получении card_order: {str(e)}")
+        return None
+
 def page_cards(df: pd.DataFrame, eng):
     """Страница с детальным анализом одной карточки"""
     
@@ -951,14 +985,19 @@ def page_cards(df: pd.DataFrame, eng):
     if "trickiness_level" not in card_data:
         card_data["trickiness_level"] = core.get_trickiness_level(card_data)
     
+    # Получаем card_order из базы данных
+    card_order = get_card_order(int(card_data["card_id"]), eng)
+    if card_order is not None:
+        card_data["card_order"] = card_order
+    
     # Создаем иерархический заголовок с указанием карточки
     create_hierarchical_header(
         levels=["program", "module", "lesson", "gz", "card"],
         values=[card_data["program"], card_data["module"], card_data["lesson"], card_data["gz"], f"Карточка {int(card_data['card_id'])}"]
     )
     
-    # Если выбрана группа заданий, добавляем кнопки со ссылками
-    add_gz_links(pd.DataFrame([card_data]), card_data["gz"])
+    # Отображаем ссылки на карточку и ГЗ
+    add_card_links(card_data)
     
     # Отображаем основную информацию о карточке
     display_card_details(card_data)
