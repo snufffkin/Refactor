@@ -45,10 +45,8 @@ def load_raw_data(_engine):
                c.total_attempts, c.attempted_share, c.success_rate, c.first_try_success_rate,
                c.complaint_rate, c.complaints_total, c.discrimination_avg, c.success_attempts_rate,
                c.time_median, c.complaints_text,
-               c.status, c.updated_at,
-               cf.practice_type
+               c.status, c.updated_at
         FROM cards_mv c
-        LEFT JOIN cards_flat cf ON c.card_id = cf.card_id
         """
     )
     return pd.read_sql(sql, _engine)
@@ -957,11 +955,9 @@ def load_card_data(program=None, module=None, lesson=None, gz=None, _engine=None
     query = """
         SELECT 
             c.*,
-            r.risk,
-            cf.practice_type
+            r.risk
         FROM mv_cards_mv c
         LEFT JOIN card_risk_cache r ON c.card_id = r.card_id
-        LEFT JOIN cards_flat cf ON c.card_id = cf.card_id
     """
     
     params = {}

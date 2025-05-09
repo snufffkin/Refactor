@@ -74,10 +74,6 @@ def display_card_details(card_data):
             "Текущий риск": f"{card_data['risk']:.3f}"
         }
         
-        # Добавляем тип практики для карточек с типом practice
-        if "card_type" in card_data and card_data["card_type"] == "practice" and "practice_type" in card_data and card_data["practice_type"] is not None:
-            card_info["Тип практики"] = card_data["practice_type"]
-        
         # Отображаем основную информацию
         for key, value in card_info.items():
             st.markdown(f"**{key}:** {value}")
