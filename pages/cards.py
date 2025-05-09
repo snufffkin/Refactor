@@ -21,6 +21,18 @@ from components.charts import display_risk_bar_chart, display_metrics_comparison
 
 
 # Функция для отображения подробной информации о карточке
+def get_screenshot_url(card_id):
+    """
+    Формирует URL для скриншота карточки из Yandex Object Storage
+    
+    Args:
+        card_id: ID карточки
+    
+    Returns:
+        str: URL скриншота
+    """
+    return f"https://snufffkin-pics.website.yandexcloud.net/Refactor/image/{card_id}.png"
+
 def display_card_details(card_data):
     """
     Отображает подробную информацию о карточке
@@ -62,6 +74,10 @@ def display_card_details(card_data):
             "Текущий риск": f"{card_data['risk']:.3f}"
         }
         
+        # Добавляем тип практики для карточек с типом practice
+        if "card_type" in card_data and card_data["card_type"] == "practice" and "practice_type" in card_data and card_data["practice_type"] is not None:
+            card_info["Тип практики"] = card_data["practice_type"]
+        
         # Отображаем основную информацию
         for key, value in card_info.items():
             st.markdown(f"**{key}:** {value}")
@@ -94,6 +110,18 @@ def display_card_details(card_data):
                 st.markdown(f"**{key}:** {value}")
     
     # Отображаем скриншот карточки под основной информацией
+    st.markdown("### 📷 Скриншот карточки")
+    screenshot_url = get_screenshot_url(int(card_data["card_id"]))
+    
+    # Создаем контейнер для скриншота с адаптивным размером
+    st.markdown(f"""
+        <div style="border: 1px solid #ccc; border-radius: 5px; padding: 10px; margin: 10px 0; background-color: white;">
+            <img src="{screenshot_url}" style="display: block; max-width: 100%; margin: 0 auto;" alt="Скриншот карточки {int(card_data['card_id'])}">
+        </div>
+    """, unsafe_allow_html=True)
+    
+    # Добавляем прямую ссылку на скриншот
+    st.markdown(f"[🔗 Открыть скриншот в новом окне]({screenshot_url})")
 
 def display_course_links(card_id, engine, card_df):
     """

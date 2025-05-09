@@ -4,6 +4,18 @@ get_schema.sh
 get_screenshot.py
 sync_with_db.py
 upload_to_yadisk.py
+add_practice_type.py
+card_structure_extractor.py
+get_card_json_structure.py
+build_trust_cookies.py
+check_missing_screenshots.py
+
+# Папки с приватными утилитами и данными
+private_utils/
+private_utils/**
+data/
+data/**
+.aws/
 
 # Логи и временные файлы
 *.log

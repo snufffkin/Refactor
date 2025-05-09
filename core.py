@@ -14,13 +14,14 @@ from functools import partial
 import pandas as pd
 import streamlit as st
 from sqlalchemy import create_engine, text
+from db_config import get_cloud_dsn
 
 from core_config import get_config
 # ---------------- DB ------------------------------------------------------- #
 
 def get_engine():
     # Строка подключения к удаленной базе данных в Яндекс.Облаке
-    cloud_dsn = "postgresql://romannikitin:changeme123@rc1b-fkbqfy1dg88d0134.mdb.yandexcloud.net:6432/course_quality?sslmode=verify-full&sslrootcert=/Users/romannikitin/.postgresql/root.crt"
+    cloud_dsn = get_cloud_dsn()
     # Используем переменную окружения, если она задана, иначе используем строку подключения к облаку
     dsn = os.getenv("DB_DSN", cloud_dsn)
     return create_engine(dsn, future=True)
@@ -39,13 +40,15 @@ def load_raw_data(_engine):
     """
     sql = text(
         """
-        SELECT program,module,module_order,lesson,lesson_order,
-               gz,gz_id,card_id,card_type,card_url,
-               total_attempts,attempted_share,success_rate,first_try_success_rate,
-               complaint_rate,complaints_total,discrimination_avg,success_attempts_rate,
-               time_median,complaints_text,
-               status,updated_at
-        FROM cards_mv
+        SELECT c.program, c.module, c.module_order, c.lesson, c.lesson_order,
+               c.gz, c.gz_id, c.card_id, c.card_type, c.card_url,
+               c.total_attempts, c.attempted_share, c.success_rate, c.first_try_success_rate,
+               c.complaint_rate, c.complaints_total, c.discrimination_avg, c.success_attempts_rate,
+               c.time_median, c.complaints_text,
+               c.status, c.updated_at,
+               cf.practice_type
+        FROM cards_mv c
+        LEFT JOIN cards_flat cf ON c.card_id = cf.card_id
         """
     )
     return pd.read_sql(sql, _engine)
@@ -954,9 +957,11 @@ def load_card_data(program=None, module=None, lesson=None, gz=None, _engine=None
     query = """
         SELECT 
             c.*,
-            r.risk
+            r.risk,
+            cf.practice_type
         FROM mv_cards_mv c
         LEFT JOIN card_risk_cache r ON c.card_id = r.card_id
+        LEFT JOIN cards_flat cf ON c.card_id = cf.card_id
     """
     
     params = {}
