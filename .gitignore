@@ -24,6 +24,8 @@ data/**
 # Локальные конфигурации
 .env
 *.env 
+*.bat
+*.sh
 
 # Файлы данных
 *.xlsx
@@ -35,3 +37,5 @@ data/**
 *.gif
 *.bmp
 *.tiff
+*.dump
+*.sql

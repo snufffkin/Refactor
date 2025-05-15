@@ -65,7 +65,14 @@ def get_db_config():
     
     return config
 
+'''
 def get_cloud_dsn():
     cert_path = get_cert_path()
     config = get_db_config()
     return f"postgresql://{config['DB_USER']}:{config['DB_PASSWORD']}@{config['DB_HOST']}:{config['DB_PORT']}/{config['DB_NAME']}?sslmode=verify-full&sslrootcert={cert_path}" 
+
+'''
+def get_cloud_dsn():
+    cert_path = get_cert_path()
+    config = get_db_config()
+    return f"postgresql://postgres.kpnxfeenvhwmcfypjaij:{config['DB_PASSWORD']}@aws-0-eu-north-1.pooler.supabase.com:5432/postgres"

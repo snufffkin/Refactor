@@ -246,7 +246,35 @@ def display_risk_bar_chart(df, category_col, limit=20, title=None, height=None):
     if title is None:
         title = f"Уровень риска по {category_col}"
     
-    # Создаем график
+    # Формируем customdata для передачи полного названия программы
+    if "program_full" in sorted_df.columns:
+        customdata = np.stack([
+            sorted_df["success"],
+            sorted_df["complaints"],
+            sorted_df["items"],
+            sorted_df["program_full"]
+        ], axis=-1)
+        hovertemplate = (
+            "<b>%{customdata[3]}</b><br>"
+            "Риск: %{y:.2f}<br>"
+            "Успешность: %{customdata[0]:.1%}<br>"
+            "Жалобы: %{customdata[1]:.1%}<br>"
+            "Элементов: %{customdata[2]}"
+        )
+    else:
+        customdata = np.stack([
+            sorted_df["success"],
+            sorted_df["complaints"],
+            sorted_df["items"]
+        ], axis=-1)
+        hovertemplate = (
+            "<b>%{x}</b><br>"
+            "Риск: %{y:.2f}<br>"
+            "Успешность: %{customdata[0]:.1%}<br>"
+            "Жалобы: %{customdata[1]:.1%}<br>"
+            "Элементов: %{customdata[2]}"
+        )
+
     fig = px.bar(
         sorted_df,
         x=category_col,
@@ -255,18 +283,9 @@ def display_risk_bar_chart(df, category_col, limit=20, title=None, height=None):
         color_continuous_scale="RdYlGn_r",
         labels={category_col: category_col.capitalize(), "risk": "Риск"},
         title=title,
-        height=height,
-        hover_data=["success", "complaints", "items"]
+        height=height
     )
-    
-    # Форматируем подсказки
-    fig.update_traces(
-        hovertemplate="<b>%{x}</b><br>" +
-                      "Риск: %{y:.2f}<br>" +
-                      "Успешность: %{customdata[0]:.1%}<br>" +
-                      "Жалобы: %{customdata[1]:.1%}<br>" +
-                      "Элементов: %{customdata[2]}"
-    )
+    fig.update_traces(customdata=customdata, hovertemplate=hovertemplate)
     
     # Добавляем горизонтальные линии для границ категорий риска
     fig.add_hline(y=0.3, line_dash="dash", line_color="green", 
