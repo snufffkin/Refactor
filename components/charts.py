@@ -9,6 +9,8 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import core
+from db_config import get_cloud_dsn
+from sqlalchemy import create_engine, text
 
 
 # Добавьте эту новую вспомогательную функцию в начало файла charts.py
@@ -226,7 +228,7 @@ def display_risk_bar_chart(df, category_col, value_column='risk', limit=20, titl
     
     Args:
         df: DataFrame с данными
-        category_col: Колонка с категориями для группировки
+        category_col: Колонка с категориями для группировки (ожидается, что это program_name)
         value_column: Колонка со значениями для оси Y (по умолчанию 'risk')
         limit: Максимальное количество элементов для отображения
         title: Заголовок графика (если None, будет сгенерирован)
@@ -240,11 +242,68 @@ def display_risk_bar_chart(df, category_col, value_column='risk', limit=20, titl
     required_cols = [category_col, value_column, "success_rate", "complaint_rate"]
     if not all(col in df.columns for col in required_cols):
         missing_cols = [col for col in required_cols if col not in df.columns]
-        # Если отсутствует cards_count, но есть card_id, это нормально для некоторых вызовов, но items не будет.
         if not ("cards_count" in df.columns or "card_id" in df.columns) and "items" not in missing_cols:
              missing_cols.append("cards_count/card_id for items")
         st.error(f"Для графика display_risk_bar_chart отсутствуют колонки: {missing_cols}. Доступные: {df.columns.tolist()}")
         return pd.DataFrame()
+
+    # --- Начало изменений: Загрузка коротких имен программ ---
+    program_short_names_df = pd.DataFrame()
+    try:
+        dsn = get_cloud_dsn()
+        if dsn:
+            engine = create_engine(dsn)
+            with engine.connect() as connection:
+                # Предполагаем, что category_col содержит program_name
+                # или program_id, если бы он был стандартизирован.
+                # Сейчас используем program_name для связи.
+                # Важно: если category_col не program_name, эту логику нужно адаптировать.
+                # В overview.py category_col = "program", который является копией "program_name"
+                # df_for_chart["program_full"] = df_for_chart["program_name"] - это уже есть в overview.py
+                query_sql = text("SELECT program_name, program_short_name FROM program_ids")
+                program_short_names_df = pd.read_sql_query(query_sql, connection)
+        else:
+            st.warning("DSN не настроен, короткие имена программ не будут загружены.")
+    except Exception as e:
+        st.warning(f"Ошибка при загрузке коротких имен программ: {e}")
+    
+    # Объединяем с df, если есть короткие имена
+    # category_col должен содержать значения, по которым можно соединить с program_name из program_ids
+    # В overview.py это df_for_chart["program"], который равен df_for_chart["program_name"]
+    # df_for_chart["program_full"] = df_for_chart["program_name"] - это уже есть в overview.py
+    
+    # Перед агрегацией, присоединим короткие имена
+    # Убедимся, что в df есть колонка, совпадающая с category_col, которая является program_name
+    if not program_short_names_df.empty:
+        # Если category_col в df это не 'program_name', а, например, 'program_id',
+        # то и в program_ids нужно выбирать 'program_id' и 'program_short_name'
+        # и мержить по 'program_id'.
+        # Сейчас мы ожидаем, что category_col == 'program_name'
+        if category_col in df.columns and 'program_name' in program_short_names_df.columns:
+            df = pd.merge(df, program_short_names_df, left_on=category_col, right_on='program_name', how='left')
+            # Заполняем отсутствующие короткие имена полными именами (или значением category_col)
+            if 'program_short_name' in df.columns:
+                 df['program_short_name'] = df['program_short_name'].fillna(df[category_col])
+            else: # Если мерж не добавил колонку (например, program_short_names_df пуст)
+                 df['program_short_name'] = df[category_col]
+            # Удаляем дубликат program_name, если он появился после merge и не совпадает с category_col
+            if 'program_name_y' in df.columns: # sufix _y по умолчанию для правой таблицы
+                df = df.drop(columns=['program_name_y'])
+            if 'program_name_x' in df.columns and category_col != 'program_name_x':
+                 df = df.rename(columns={'program_name_x': 'program_name_original_from_df'})
+
+
+        else:
+            st.warning(f"Не удалось сопоставить category_col ('{category_col}') с 'program_name' из program_ids для добавления коротких имен.")
+            df['program_short_name'] = df[category_col] # Используем исходные значения, если не удалось смержить
+    else:
+        df['program_short_name'] = df[category_col] # Используем исходные значения, если не удалось загрузить program_ids
+    
+    # Если program_full не было, но есть category_col (которое является полным именем)
+    if 'program_full' not in df.columns and category_col in df.columns:
+        df['program_full'] = df[category_col]
+
+    # --- Конец изменений ---
 
     agg_spec = {
         value_column: (value_column, "mean"),
@@ -256,66 +315,123 @@ def display_risk_bar_chart(df, category_col, value_column='risk', limit=20, titl
     elif "card_id" in df.columns:
         agg_spec["items"] = ("card_id", "nunique")
     else:
-        # Если нет ни cards_count, ни card_id, создаем items как количество строк в группе
-        # Это может быть не совсем то, что ожидается, но лучше, чем ошибка
-        df["_group_count_helper"] = 1 # Временный столбец
+        df["_group_count_helper"] = 1 
         agg_spec["items"] = ("_group_count_helper", "count")
 
-    # Группируем данные по указанной колонке и вычисляем средний риск
+    # Группируем данные по КОРОТКОМУ имени программы для отображения на оси X
+    # Важно: category_col все еще используется для hover (если program_full нет)
+    # или как ключ для других данных. Здесь для агрегации и оси X используем program_short_name.
+    # Также нужно агрегировать program_full для hover.
+    # Если program_short_name не уникальны, группировка по ним может быть некорректной.
+    # Предполагаем, что program_short_name должны быть уникальны для отображения.
+    # Если нет, то нужно пересмотреть.
+    # Более безопасный подход - группировать по исходному category_col (полное имя или ID),
+    # а program_short_name использовать только для меток оси X.
+    
+    # Сохраняем исходный category_col для группировки, если он содержит уникальные идентификаторы
+    # program_short_name будет использоваться для отображения на оси.
+    # agg_df = df.groupby(category_col).agg(**agg_spec).reset_index()
+    # Чтобы сохранить и короткое, и полное имя, добавим их в агрегацию, если они есть
+    if 'program_short_name' in df.columns:
+        agg_spec['program_short_name_agg'] = ('program_short_name', 'first') # Берем первое короткое имя в группе
+    if 'program_full' in df.columns:
+        agg_spec['program_full_agg'] = ('program_full', 'first') # Берем первое полное имя в группе
+    
     agg_df = df.groupby(category_col).agg(**agg_spec).reset_index()
     
-    if "_group_count_helper" in df.columns: # Удаляем временный столбец
-        df.drop(columns=["_group_count_helper"], inplace=True)
+    # Если program_short_name_agg не было добавлено (например, df не содержал program_short_name)
+    # или если мы хотим использовать program_short_name как основную категорию для оси X,
+    # нужно решить, как это повлияет на уникальность
+    # Сейчас agg_df.columns будет содержать category_col, value_column, success, complaints, items,
+    # и опционально program_short_name_agg, program_full_agg
 
-    # Сортируем по значению (от высокого к низкому)
+    # Переименовываем агрегированные колонки обратно, если они были добавлены
+    if 'program_short_name_agg' in agg_df.columns:
+        agg_df.rename(columns={'program_short_name_agg': 'program_short_name'}, inplace=True)
+    elif 'program_short_name' in agg_df.columns: # Если было в df, но не агрегировалось отдельно
+        pass # уже есть program_short_name
+    else: # Если совсем нет, используем category_col
+        agg_df['program_short_name'] = agg_df[category_col]
+
+    if 'program_full_agg' in agg_df.columns:
+        agg_df.rename(columns={'program_full_agg': 'program_full'}, inplace=True)
+    elif 'program_full' not in agg_df.columns: # Если не было и не агрегировалось
+         agg_df['program_full'] = agg_df[category_col] # Используем category_col как полное имя
+
+    if "_group_count_helper" in df.columns: 
+        # df.drop(columns=["_group_count_helper"], inplace=True) # df может быть уже не тем
+        pass # Временный столбец использовался для df, а не agg_df
+
     sorted_df = agg_df.sort_values(value_column, ascending=False).head(limit)
     
-    # Создаем заголовок, если не указан
     if title is None:
-        title = f"Уровень риска по {category_col}"
+        # Используем program_short_name или category_col для заголовка
+        display_category_col_name = "program_short_name" if 'program_short_name' in sorted_df.columns else category_col
+        title = f"Уровень риска по {display_category_col_name.replace('_', ' ').capitalize()}"
     
-    # Формируем customdata для передачи полного названия программы
-    if "program_full" in sorted_df.columns:
-        customdata = np.stack([
-            sorted_df["success"],
-            sorted_df["complaints"],
-            sorted_df["items"],
-            sorted_df["program_full"]
-        ], axis=-1)
-        hovertemplate = (
-            "<b>%{customdata[3]}</b><br>"
-            "Риск: %{y:.2f}<br>"
-            "Успешность: %{customdata[0]:.1%}<br>"
-            "Жалобы: %{customdata[1]:.1%}<br>"
-            "Элементов: %{customdata[2]}"
-        )
-    else:
-        customdata = np.stack([
-            sorted_df["success"],
-            sorted_df["complaints"],
-            sorted_df["items"]
-        ], axis=-1)
-        hovertemplate = (
-            "<b>%{x}</b><br>"
-            "Риск: %{y:.2f}<br>"
-            "Успешность: %{customdata[0]:.1%}<br>"
-            "Жалобы: %{customdata[1]:.1%}<br>"
-            "Элементов: %{customdata[2]}"
-        )
+    # Обновляем customdata и hovertemplate
+    # Теперь program_short_name будет на оси X
+    # program_full (полное имя программы) будет в customdata для подсказки
+    
+    custom_data_cols = [
+        sorted_df["success"],
+        sorted_df["complaints"],
+        sorted_df["items"]
+    ]
+    hover_template_parts = [
+        "Риск: %{y:.2f}",
+        "Успешность: %{customdata[0]:.1%}",
+        "Жалобы: %{customdata[1]:.1%}",
+        "Элементов: %{customdata[2]}"
+    ]
+
+    # Основной текст для hover - короткое имя (которое на оси X)
+    # Дополнительно - полное имя программы
+    # x_display_col = 'program_short_name' if 'program_short_name' in sorted_df.columns else category_col
+    x_display_col = 'program_short_name'
+
+
+    if 'program_full' in sorted_df.columns:
+        custom_data_cols.append(sorted_df['program_full'])
+        # hovertemplate = f"<b>%{{x}}</b> ({sorted_df['program_full']})<br>" # Не сработает, т.к. sorted_df['program_full'] это серия
+        hovertemplate_title = "<b>%{x}</b> (%{customdata[3]})<br>"
+
+    else: # Если program_full нет, используем category_col (который может быть program_name)
+        # custom_data_cols.append(sorted_df[category_col]) # category_col уже будет как %{x} или его надо передать?
+                                                        # %{x} это значение из колонки x_display_col
+        # Если program_full нет, то x (короткое имя) и есть то, что мы хотим показать жирным.
+        # Если category_col (исходное полное имя) отличается от program_short_name, его можно добавить
+        if category_col in sorted_df.columns and category_col != x_display_col :
+            custom_data_cols.append(sorted_df[category_col])
+            hovertemplate_title = "<b>%{x}</b> (Полное: %{customdata[3]})<br>"
+        else:
+            hovertemplate_title = "<b>%{x}</b><br>"
+
+
+    final_hovertemplate = hovertemplate_title + "<br>".join(hover_template_parts)
+    
+    # Если x_display_col (program_short_name) отсутствует, используем category_col
+    if x_display_col not in sorted_df.columns:
+        if category_col in sorted_df.columns:
+            x_display_col = category_col
+            # st.warning(f"Колонка '{x_display_col}' для оси X не найдена, используется '{category_col}'.")
+        else: # Этого не должно произойти, если category_col был в required_cols
+            st.error(f"Не найдена колонка для оси X ('{x_display_col}' или '{category_col}')")
+            return pd.DataFrame()
+
 
     fig = px.bar(
         sorted_df,
-        x=category_col,
+        x=x_display_col, # Используем program_short_name для оси X
         y=value_column,
         color=value_column,
         color_continuous_scale="RdYlGn_r",
-        labels={category_col: category_col.capitalize(), value_column: value_column.capitalize()},
+        labels={x_display_col: "Программа (кратко)", value_column: value_column.capitalize()},
         title=title,
         height=height
     )
-    fig.update_traces(customdata=customdata, hovertemplate=hovertemplate)
+    fig.update_traces(customdata=np.stack(custom_data_cols, axis=-1), hovertemplate=final_hovertemplate)
     
-    # Добавляем горизонтальные линии для границ категорий риска
     fig.add_hline(y=0.3, line_dash="dash", line_color="green", 
                   annotation_text="Низкий риск", annotation_position="left")
     fig.add_hline(y=0.5, line_dash="dash", line_color="gold", 

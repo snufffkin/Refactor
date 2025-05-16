@@ -239,76 +239,6 @@ def display_risk_distribution(df, group_by_col=None):
         fig.add_vline(x=0.75, line_dash="dash", line_color="red", annotation_text="Высокий", annotation_position="top right")
         st.plotly_chart(fig, use_container_width=True)
 
-def display_overall_card_risk_stats():
-    """
-    Отображает общую статистику по уровням риска всех карточек в card_risk_cache.
-    Выполняет SQL-запрос с использованием get_cloud_dsn() из db_config.
-    """
-    query_sql = text("""
-    SELECT
-        COUNT(*) as total_cards,
-        COALESCE(SUM(CASE WHEN risk IS NULL OR risk = 0 THEN 1 ELSE 0 END), 0) as no_risk_count,
-        COALESCE(SUM(CASE WHEN risk > 0 AND risk <= 0.25 THEN 1 ELSE 0 END), 0) as low_risk_count,
-        COALESCE(SUM(CASE WHEN risk > 0.25 AND risk <= 0.5 THEN 1 ELSE 0 END), 0) as moderate_risk_count,
-        COALESCE(SUM(CASE WHEN risk > 0.5 AND risk <= 0.75 THEN 1 ELSE 0 END), 0) as high_risk_count,
-        COALESCE(SUM(CASE WHEN risk > 0.75 THEN 1 ELSE 0 END), 0) as critical_risk_count
-    FROM card_risk_cache;
-    """)
-    
-    st.subheader("📊 Распределение рисков по всем карточкам")
-
-    try:
-        dsn = get_cloud_dsn()
-        if not dsn:
-            st.error("DSN для подключения к базе данных не получен.")
-            return
-            
-        engine = create_engine(dsn)
-        with engine.connect() as connection:
-            df_risks = pd.read_sql_query(query_sql, connection)
-
-        if not df_risks.empty and df_risks.iloc[0] is not None:
-            results = df_risks.iloc[0]
-            total_cards = int(results.get('total_cards', 0))
-            no_risk_count = int(results.get('no_risk_count', 0))
-            low_risk_count = int(results.get('low_risk_count', 0))
-            moderate_risk_count = int(results.get('moderate_risk_count', 0))
-            high_risk_count = int(results.get('high_risk_count', 0))
-            critical_risk_count = int(results.get('critical_risk_count', 0))
-
-            if total_cards > 0:
-                no_risk_perc = (no_risk_count / total_cards) * 100
-                low_risk_perc = (low_risk_count / total_cards) * 100
-                moderate_risk_perc = (moderate_risk_count / total_cards) * 100
-                high_risk_perc = (high_risk_count / total_cards) * 100
-                critical_risk_perc = (critical_risk_count / total_cards) * 100
-            else:
-                no_risk_perc = low_risk_perc = moderate_risk_perc = high_risk_perc = critical_risk_perc = 0
-
-            cols_risk_cards = st.columns(5)
-            with cols_risk_cards[0]:
-                delta_val_no_risk = f"{no_risk_perc:.1f}%" if total_cards > 0 else None
-                st.metric(label="Без риска", value=f"{no_risk_count:,}", delta=delta_val_no_risk)
-            with cols_risk_cards[1]:
-                delta_val_low = f"{low_risk_perc:.1f}%" if total_cards > 0 else None
-                st.metric(label="Низкий риск", value=f"{low_risk_count:,}", delta=delta_val_low)
-            with cols_risk_cards[2]:
-                delta_val_mod = f"{moderate_risk_perc:.1f}%" if total_cards > 0 else None
-                st.metric(label="Умеренный риск", value=f"{moderate_risk_count:,}", delta=delta_val_mod)
-            with cols_risk_cards[3]:
-                delta_val_high = f"{high_risk_perc:.1f}%" if total_cards > 0 else None
-                st.metric(label="Высокий риск", value=f"{high_risk_count:,}", delta=delta_val_high, delta_color="inverse")
-            with cols_risk_cards[4]:
-                delta_val_crit = f"{critical_risk_perc:.1f}%" if total_cards > 0 else None
-                st.metric(label="Критический риск", value=f"{critical_risk_count:,}", delta=delta_val_crit, delta_color="inverse")
-        else:
-            st.warning("Данные о распределении рисков карточек не получены или пусты.")
-            
-    except ImportError as ie:
-        st.error(f"Ошибка импорта для работы с БД: {ie}. Установите необходимые библиотеки (например, psycopg2-binary, sqlalchemy).")    
-    except Exception as e:
-        st.error(f"Ошибка при подключении к БД или выполнении запроса для статистики рисков: {e}")
-
 __all__ = [
     'display_trickiness_distribution',
     'update_display_metrics_row',
@@ -317,5 +247,4 @@ __all__ = [
     'display_metrics_row',
     'display_status_chart',
     'display_risk_distribution',
-    'display_overall_card_risk_stats'
 ]
