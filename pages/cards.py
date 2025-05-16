@@ -66,10 +66,10 @@ def display_card_details(card_data):
         card_info = {
             "ID карточки": int(card_data["card_id"]),
             "Тип карточки": card_data["card_type"] if "card_type" in card_data else "Не указан",
-            "Программа": card_data["program"],
-            "Модуль": card_data["module"],
-            "Урок": card_data["lesson"],
-            "Группа заданий": card_data["gz"],
+            "Программа": card_data["program_name"],
+            "Модуль": card_data["module_name"],
+            "Урок": card_data["lesson_name"],
+            "Группа заданий": card_data["gz_name"],
             "Статус": card_data["status"],
             "Текущий риск": f"{card_data['risk']:.3f}"
         }
@@ -180,7 +180,7 @@ def display_course_links(card_id, engine, card_df):
             return
         
         # Группируем по программе, модулю, уроку
-        key_columns = ['program', 'module', 'lesson']
+        key_columns = ['program_name', 'module_name', 'lesson_name']
         if all(col in matching_cards.columns for col in key_columns):
             grouped = matching_cards.groupby(key_columns)
             
@@ -190,11 +190,12 @@ def display_course_links(card_id, engine, card_df):
                 with st.expander(f"📚 {program} / {module} / {lesson}", expanded=False):
                     # Создаем таблицу
                     for _, row in group.iterrows():
-                        gz = row.get('gz', 'Неизвестно')
+                        gz = row.get('gz_name', 'Неизвестно')
                         card_type = row.get('card_type', 'Неизвестно')
                         
                         # Формируем URL для перехода к ГЗ
                         gz_url_params = {
+                            "page": "gz", # Добавляем целевую страницу
                             "program": program,
                             "module": module,
                             "lesson": lesson,
@@ -841,16 +842,30 @@ def display_card_status_form(card_data, engine):
     }
     
     # Получаем текущий статус
-    current_status = card_data["status"]
-    
+    current_status = card_data.get("status") # Используем .get() для большей безопасности
+
+    # Определяем индекс для selectbox
+    status_keys = list(statuses.keys())
+    current_status_index = 0 # Индекс по умолчанию (для 'new')
+
+    if current_status in status_keys:
+        current_status_index = status_keys.index(current_status)
+    else:
+        st.warning(f"Текущий статус карточки ('{current_status}') недействителен или отсутствует. Используется статус по умолчанию 'new'.")
+        # Если статус недействителен, устанавливаем current_status в 'new', чтобы форма работала корректно
+        current_status = "new" 
+        if "new" in status_keys: # Убедимся, что 'new' есть в ключах
+            current_status_index = status_keys.index("new")
+        # Если 'new' по какой-то причине отсутствует, current_status_index останется 0, что безопасно
+
     # Создаем форму для обновления статуса
     with st.form(key="update_status_form"):
         # Выбор нового статуса
         new_status = st.selectbox(
             "Статус карточки",
-            options=list(statuses.keys()),
-            format_func=lambda x: f"{x} - {statuses[x]}",
-            index=list(statuses.keys()).index(current_status)
+            options=status_keys, # Используем status_keys
+            format_func=lambda x: f"{x} - {statuses.get(x, 'Неизвестный статус')}", # .get() для безопасности
+            index=current_status_index
         )
         
         # Кнопка для сохранения статуса
@@ -939,7 +954,7 @@ def get_card_order(card_id, engine):
         st.error(f"Ошибка при получении card_order: {str(e)}")
         return None
 
-def page_cards(df: pd.DataFrame, eng):
+def page_cards(df_card_details: pd.DataFrame, df_structure: pd.DataFrame, eng):
     """Страница с детальным анализом одной карточки"""
     
     # Получаем выбранные фильтры
@@ -948,8 +963,9 @@ def page_cards(df: pd.DataFrame, eng):
     lesson_filter = st.session_state.get("filter_lesson")
     gz_filter = st.session_state.get("filter_gz")
     
-    # Фильтруем данные по выбранным фильтрам
-    df_filtered = core.apply_filters(df, ["program", "module", "lesson", "gz"])
+    # Фильтруем данные структуры для селектора карточек, если card_id не выбран
+    # df_structure - это cards_structure
+    df_filtered_structure = core.apply_filters(df_structure)
     
     # Получаем card_id из параметра запроса или из состояния
     query_params = st.query_params
@@ -971,23 +987,45 @@ def page_cards(df: pd.DataFrame, eng):
         )
         
         # Если данных нет, показываем предупреждение
-        if df_filtered.empty:
+        if df_filtered_structure.empty:
             st.warning("Нет данных для выбранных фильтров. Выберите другие фильтры в боковой панели.")
             return
         
+        # Данные для селектора берем из df_card_details, отфильтрованные по структуре
+        # Присоединяем метрики (risk, card_type) к отфильтрованной структуре для селектора
+        if df_card_details is not None and not df_card_details.empty:
+            # Убедимся, что df_card_details содержит card_id как int для мержа
+            df_card_details["card_id"] = pd.to_numeric(df_card_details["card_id"], errors='coerce')
+            df_filtered_structure["card_id"] = pd.to_numeric(df_filtered_structure["card_id"], errors='coerce')
+
+            # Выбираем только нужные колонки из df_card_details перед мержем, чтобы избежать дубликатов колонок структуры
+            # Предполагаем, что df_card_details содержит card_id, risk, card_type
+            cols_from_details = ["card_id"]
+            if "risk" in df_card_details.columns: cols_from_details.append("risk")
+            if "card_type" in df_card_details.columns: cols_from_details.append("card_type")
+            
+            df_selector_data = pd.merge(
+                df_filtered_structure[["card_id"]].drop_duplicates(), # Только ID из структуры, чтобы не было дублей структурных полей
+                df_card_details[cols_from_details],
+                on="card_id",
+                how="left"
+            )
+            df_selector_data.fillna({"risk": 0, "card_type": "N/A"}, inplace=True)
+        else:
+            # Если df_card_details пуст, используем только структуру и добавляем заглушки для метрик
+            df_selector_data = df_filtered_structure.copy()
+            if "risk" not in df_selector_data.columns: df_selector_data["risk"] = 0
+            if "card_type" not in df_selector_data.columns: df_selector_data["card_type"] = "N/A"
+
         # Сортируем карточки по риску для лучшего выбора
-        df_sorted = df_filtered.sort_values("risk", ascending=False)
+        df_sorted_for_selector = df_selector_data.sort_values("risk", ascending=False)
         
         st.header("🔍 Выберите карточку для анализа")
         
-        # Предварительно проверяем наличие скриншотов для всех карточек
-        # и добавляем информацию в DataFrame
-        card_ids = df_sorted["card_id"].unique()
-        # Создаем селектор карточек
         selected_card_id = st.selectbox(
             "Выберите карточку",
-            options=df_sorted["card_id"].values,
-            format_func=lambda x: f"ID: {x} - Риск: {df[df['card_id'] == x]['risk'].values[0]:.2f} - Тип: {df[df['card_id'] == x]['card_type'].values[0]} {'📷' if y and has_screenshot.get(x, False) else ''}",
+            options=df_sorted_for_selector["card_id"].unique(), # Уникальные ID
+            format_func=lambda x: f"ID: {x} - Риск: {df_sorted_for_selector[df_sorted_for_selector['card_id'] == x]['risk'].values[0]:.2f} - Тип: {df_sorted_for_selector[df_sorted_for_selector['card_id'] == x]['card_type'].values[0]}",
             key="card_selector"
         )
         
@@ -1000,16 +1038,21 @@ def page_cards(df: pd.DataFrame, eng):
         # Перезагружаем страницу для применения выбора
         st.rerun()
     
-    # Получаем данные выбранной карточки
-    card_data = df[df["card_id"] == int(card_id)]
+    # Получаем данные выбранной карточки из df_card_details
+    # df_card_details должен содержать все метрики и структурные поля (из джойна в load_card_data)
+    if df_card_details is None or df_card_details.empty:
+        st.error(f"Данные о карточках (df_card_details) не загружены. Невозможно отобразить карточку ID {card_id}.")
+        return
+
+    card_data_rows = df_card_details[df_card_details["card_id"] == int(card_id)]
     
     # Проверяем, есть ли данные для карточки
-    if card_data.empty:
+    if card_data_rows.empty:
         st.error(f"Карточка с ID {card_id} не найдена в данных.")
         return
     
     # Получаем Series с данными карточки
-    card_data = card_data.iloc[0]
+    card_data = card_data_rows.iloc[0]
     
     # Добавляем метрику разницы между success_rate и first_try_success_rate
     card_data["success_diff"] = card_data["success_rate"] - card_data["first_try_success_rate"]
@@ -1026,7 +1069,7 @@ def page_cards(df: pd.DataFrame, eng):
     # Создаем иерархический заголовок с указанием карточки
     create_hierarchical_header(
         levels=["program", "module", "lesson", "gz", "card"],
-        values=[card_data["program"], card_data["module"], card_data["lesson"], card_data["gz"], f"Карточка {int(card_data['card_id'])}"]
+        values=[card_data["program_name"], card_data["module_name"], card_data["lesson_name"], card_data["gz_name"], f"Карточка {int(card_data['card_id'])}"]
     )
     
     # Отображаем ссылки на карточку и ГЗ
@@ -1036,7 +1079,7 @@ def page_cards(df: pd.DataFrame, eng):
     display_card_details(card_data)
     
     # Отображаем привязку к курсам, передаем DataFrame целиком
-    display_course_links(int(card_data["card_id"]), eng, df)
+    display_course_links(int(card_data["card_id"]), eng, df_structure)
     
     # Добавляем разделитель
     st.markdown("---")

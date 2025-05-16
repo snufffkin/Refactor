@@ -17,11 +17,44 @@ import navigation_utils
 
 def page_modules(df: pd.DataFrame):
     """Страница модуля с детализацией по урокам"""
-    # Фильтруем данные по выбранной программе и модулю
-    df_module = core.apply_filters(df, ["program", "module"])
+    
     prog_name = st.session_state.get('filter_program')
     module_name = st.session_state.get('filter_module')
-    
+
+    if not prog_name or not module_name:
+        st.warning("Программа или модуль не выбраны.")
+        # TODO: Возможно, предложить выбрать программу/модуль или вернуться на предыдущую страницу
+        return
+
+    if df is None or df.empty:
+        st.warning("Нет данных об уроках для отображения.")
+        return
+
+    # Переименование столбцов из mv_lesson_stats в ожидаемый формат
+    column_mapping = {
+        "avg_success_rate": "success_rate",
+        "avg_first_try_success_rate": "first_try_success_rate",
+        "avg_complaint_rate": "complaint_rate",
+        "avg_discrimination": "discrimination_avg",
+        "avg_risk": "risk",
+        "avg_time_median": "time_median",
+        # total_gz будет использован для cards_count
+    }
+    df = df.rename(columns=column_mapping)
+
+    # Создание cards_count на основе total_gz или длины gz_ids
+    # В mv_lesson_stats есть total_gz
+    if 'total_gz' in df.columns:
+        df['cards_count'] = df['total_gz']
+    elif 'gz_ids' in df.columns: # Резервный вариант
+        df['cards_count'] = df['gz_ids'].apply(lambda x: len(x) if isinstance(x, (list, np.ndarray)) else 0)
+    else:
+        df['cards_count'] = 0
+
+    # Фильтруем данные по выбранной программе и модулю
+    # df уже должен содержать только уроки, отфильтруем их
+    df_module = df[(df["program_name"] == prog_name) & (df["module_name"] == module_name)].copy()
+
     # Создаем иерархический заголовок
     create_hierarchical_header(
         levels=["program", "module"],
@@ -35,67 +68,58 @@ def page_modules(df: pd.DataFrame):
     
     # 1. Отображаем общие метрики модуля
     st.subheader("📈 Метрики модуля")
-    display_metrics_row(df_module, compare_with=df[df["program"] == prog_name])
+    # display_metrics_row(df_module, compare_with=df[df["program_name"] == prog_name])
+    # df для compare_with должен быть df модулей, а не уроков. Пока упростим.
+    display_metrics_row(df_module)
     
     # Добавляем метрику среднего суммарного времени на урок
-    lessons_data = df_module.groupby("lesson").agg(
-        total_time_median=("time_median", "sum")
-    ).reset_index()
-    
-    avg_time_per_lesson = lessons_data["total_time_median"].mean() if not lessons_data.empty else 0
-    avg_time_per_lesson = avg_time_per_lesson / 60
-    
-    # Отображаем метрику времени
-    st.subheader("⏱️ Среднее время на урок")
-    st.metric(
-        label="Среднее суммарное время на урок (мин)",
-        value=f"{avg_time_per_lesson:.1f}"
-    )
+    if 'time_median' in df_module.columns and not df_module.empty:
+        avg_time_per_lesson = df_module["time_median"].mean() / 60 if not df_module.empty else 0
+        st.subheader("⏱️ Среднее время на урок в этом модуле")
+        st.metric(
+            label="Среднее время на урок (мин)",
+            value=f"{avg_time_per_lesson:.1f}"
+        )
     
     # 2. Отображаем распределение риска и статусы
     col1, col2 = st.columns(2)
     
     with col1:
-        display_risk_distribution(df_module, "lesson")
+        display_risk_distribution(df_module, "lesson_name")
     
     with col2:
-        display_status_chart(df_module, "lesson")
+        # display_status_chart(df_module, "lesson_name") # Status не доступен в mv_lesson_stats
+        st.info("Данные о статусах уроков/карточек недоступны на этом уровне.")
     
     # 3. Визуализируем уроки в виде столбчатой диаграммы
     st.subheader("📊 Уроки модуля")
     
     # Агрегируем данные по урокам
-    agg = df_module.groupby("lesson").agg(
-        risk=("risk", "mean"),
-        success=("success_rate", "mean"),
-        complaints=("complaint_rate", "mean"),
-        discrimination=("discrimination_avg", "mean"),
-        cards=("card_id", "nunique")
-    ).reset_index()
-    
-    # Сортируем уроки по порядку, если есть такая колонка
-    if "lesson_order" in df_module.columns:
-        lesson_order = df_module.groupby("lesson")["lesson_order"].first().reset_index()
-        agg = agg.merge(lesson_order, on="lesson", how="left")
-        agg = agg.sort_values("lesson_order")
+    # Если df_module уже содержит уникальные уроки, то agg - это просто df_module с нужными колонками
+    # Предполагаем, что df_module - это уже список уроков для текущего модуля
+    agg_lessons_display = df_module[["lesson_name", "risk", "success_rate", "complaint_rate", "discrimination_avg", "cards_count", "lesson_order"]].copy()
+    agg_lessons_display.rename(columns={'success_rate': 'success', 'complaint_rate': 'complaints', 'discrimination_avg': 'discrimination', 'cards_count': 'cards'}, inplace=True)
+        
+    # Сортируем уроки по порядку
+    if "lesson_order" in agg_lessons_display.columns:
+        agg_lessons_display = agg_lessons_display.sort_values("lesson_order")
     else:
-        # Если нет колонки с порядком, сортируем по риску
-        agg = agg.sort_values("risk", ascending=False)
+        agg_lessons_display = agg_lessons_display.sort_values("risk", ascending=False)
     
     # Добавляем последовательную нумерацию
-    agg = agg.reset_index(drop=True)
-    agg["lesson_num"] = agg.index + 1
+    agg_lessons_display = agg_lessons_display.reset_index(drop=True)
+    agg_lessons_display["lesson_num"] = agg_lessons_display.index + 1
     
-    # Создаем столбчатую диаграмму риска по урокам с использованием порядковых номеров
+    # Создаем столбчатую диаграмму риска по урокам
     fig = px.bar(
-        agg,
-        x="lesson_num",  # Используем последовательную нумерацию вместо ID
+        agg_lessons_display,
+        x="lesson_num",
         y="risk",
         color="risk",
         color_continuous_scale="RdYlGn_r",
         labels={"lesson_num": "Номер урока", "risk": "Риск"},
         title="Уровень риска по урокам",
-        hover_data=["lesson", "success", "complaints", "discrimination", "cards"]  # Добавляем реальное название в подсказку
+        hover_data=["lesson_name", "success", "complaints", "discrimination", "cards"]
     )
     
     # Добавляем горизонтальные линии для границ категорий риска
@@ -120,7 +144,7 @@ def page_modules(df: pd.DataFrame):
     fig.update_layout(
         xaxis_title="Номер урока",
         yaxis_title="Риск",
-        xaxis_tickangle=0  # Убираем наклон, т.к. числа компактны
+        xaxis_tickangle=0
     )
     
     st.plotly_chart(fig, use_container_width=True)
@@ -132,8 +156,8 @@ def page_modules(df: pd.DataFrame):
     tabs = st.tabs(["Метрики уроков", "Успешность и жалобы", "Радарная диаграмма"])
     
     with tabs[0]:
-        # График сравнения нескольких метрик - используем нумерацию вместо ID
-        agg_metrics = df_module.groupby("lesson").agg(
+        # График сравнения нескольких метрик
+        agg_metrics = df_module.groupby("lesson_name").agg(
             success_rate=("success_rate", "mean"),
             complaint_rate=("complaint_rate", "mean"),
             discrimination_avg=("discrimination_avg", "mean"),
@@ -142,8 +166,8 @@ def page_modules(df: pd.DataFrame):
         
         # Добавляем последовательную нумерацию для групп заданий
         if "lesson_order" in df_module.columns:
-            lesson_order = df_module.groupby("lesson")["lesson_order"].first().reset_index()
-            agg_metrics = agg_metrics.merge(lesson_order, on="lesson", how="left")
+            lesson_order = df_module.groupby("lesson_name")["lesson_order"].first().reset_index()
+            agg_metrics = agg_metrics.merge(lesson_order, on="lesson_name", how="left")
             agg_metrics = agg_metrics.sort_values("lesson_order")
         else:
             agg_metrics = agg_metrics.sort_values("risk", ascending=False)
@@ -157,7 +181,7 @@ def page_modules(df: pd.DataFrame):
         # Переводим в формат "длинных данных" для графика
         melted_df = pd.melt(
             agg_metrics,
-            id_vars=["lesson", "lesson_num"],
+            id_vars=["lesson_name", "lesson_num"],
             value_vars=["success_rate", "complaint_rate", "discrimination_avg", "risk"],
             var_name="metric",
             value_name="value"
@@ -175,11 +199,11 @@ def page_modules(df: pd.DataFrame):
         # Создаем график сравнения метрик
         fig_metrics = px.bar(
             melted_df,
-            x="lesson_num",  # Используем порядковые номера вместо ID
+            x="lesson_num",
             y="value",
             color="metric_name",
             barmode="group",
-            hover_data=["lesson"],  # Показываем реальное название в подсказке
+            hover_data=["lesson_name"],
             labels={
                 "lesson_num": "Номер урока",
                 "value": "Значение",
@@ -188,27 +212,27 @@ def page_modules(df: pd.DataFrame):
             title="Сравнение ключевых метрик по урокам"
         )
         
-        # Настраиваем формат оси Y в зависимости от метрики
         fig_metrics.update_layout(
             yaxis_tickformat=".1%",
-            xaxis_tickangle=0  # Убираем наклон, т.к. числа компактны
+            xaxis_tickangle=0
         )
         
         st.plotly_chart(fig_metrics, use_container_width=True)
     
     with tabs[1]:
         # График зависимости успешности и жалоб
-        display_success_complaints_chart(df_module, "lesson", limit=20)
+        display_success_complaints_chart(df_module, "lesson_name", limit=20)
     
     with tabs[2]:
         # Радарная диаграмма для топ-5 уроков с высоким риском
-        display_completion_radar(df_module, "lesson", limit=5)
+        display_completion_radar(df_module, "lesson_name", limit=5)
     
     # 5. Таблица с уроками
     st.subheader("📋 Детальная информация по урокам")
     
-    # Улучшенная таблица с уроками, добавляем номер для соответствия с графиком
-    detailed_df = agg[["lesson_num", "lesson", "risk", "success", "complaints", "discrimination", "cards"]]
+    # Улучшенная таблица с уроками
+    # detailed_df = agg[["lesson_num", "lesson_name", "risk", "success", "complaints", "discrimination", "cards"]]
+    detailed_df = agg_lessons_display[["lesson_num", "lesson_name", "risk", "success", "complaints", "discrimination", "cards"]]
     detailed_df.columns = ["Номер", "Урок", "Риск", "Успешность", "Жалобы", "Дискриминативность", "Карточек"]
     
     st.dataframe(
@@ -226,7 +250,8 @@ def page_modules(df: pd.DataFrame):
     
     # 6. Список уроков с кликабельными ссылками
     st.subheader("📖 Список уроков")
-    display_clickable_items(df_module, "lesson", "lesson", metrics=["cards", "risk", "success"])
+    # display_clickable_items(df_module, "lesson_name", "lesson", metrics=["cards", "risk", "success"])
+    display_clickable_items(df_module, "lesson_name", "lesson", metrics=["cards_count", "risk", "success_rate"])
     
     # 7. Если урок выбран, показываем встроенную страницу ГЗ
     if st.session_state.get("filter_lesson"):

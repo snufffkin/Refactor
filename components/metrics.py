@@ -7,8 +7,11 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import plotly.graph_objects as go
 
-# Исправление в components/metrics.py или в соответствующей функции
+import core
+from db_config import get_cloud_dsn
+from sqlalchemy import create_engine, text
 
 def display_trickiness_distribution(df, group_by_col=None):
     """
@@ -18,29 +21,22 @@ def display_trickiness_distribution(df, group_by_col=None):
         df: DataFrame с данными
         group_by_col: Колонка для группировки (если None, используются все данные)
     """
-    # Проверяем наличие колонки trickiness_level
     if "trickiness_level" not in df.columns:
         df["trickiness_level"] = df.apply(core.get_trickiness_level, axis=1)
     
-    # Определяем категории подлости
     trickiness_categories = {
         0: "Нет подлости",
         1: "Низкий уровень подлости",
         2: "Средний уровень подлости",
         3: "Высокий уровень подлости"
     }
-    
-    # Добавляем колонку с текстовыми категориями
     df["trickiness_category"] = df["trickiness_level"].map(trickiness_categories)
     
     if group_by_col is not None:
-        # Группируем данные по указанной колонке
         trickiness_distribution = []
-        
         for _, group in df.groupby(group_by_col):
             trickiness_counts = group["trickiness_level"].value_counts().sort_index()
             name = group[group_by_col].iloc[0]
-            
             for level, count in trickiness_counts.items():
                 trickiness_distribution.append({
                     "name": name,
@@ -48,48 +44,31 @@ def display_trickiness_distribution(df, group_by_col=None):
                     "category": trickiness_categories.get(level, "Неизвестно"),
                     "count": count
                 })
-        
         trickiness_df = pd.DataFrame(trickiness_distribution)
-        
-        # Группируем по категории и считаем общее количество
         overall_distribution = trickiness_df.groupby("category")["count"].sum().reset_index()
         overall_distribution.columns = ["Категория подлости", "Количество"]
-        
-        # Устанавливаем правильный порядок категорий
-        category_order = list(trickiness_categories.values())
-        overall_distribution["Категория подлости"] = pd.Categorical(
-            overall_distribution["Категория подлости"], 
-            categories=category_order, 
-            ordered=True
-        )
-        overall_distribution = overall_distribution.sort_values("Категория подлости")
     else:
-        # Используем все данные напрямую
         trickiness_counts = df["trickiness_level"].value_counts().sort_index()
-        
         overall_distribution = pd.DataFrame({
             "Категория подлости": [trickiness_categories.get(level, "Неизвестно") for level in trickiness_counts.index],
             "Количество": trickiness_counts.values
         })
         
-        # Устанавливаем правильный порядок категорий
-        category_order = list(trickiness_categories.values())
-        overall_distribution["Категория подлости"] = pd.Categorical(
-            overall_distribution["Категория подлости"], 
-            categories=category_order, 
-            ordered=True
-        )
-        overall_distribution = overall_distribution.sort_values("Категория подлости")
+    category_order = list(trickiness_categories.values())
+    overall_distribution["Категория подлости"] = pd.Categorical(
+        overall_distribution["Категория подлости"], 
+        categories=category_order, 
+        ordered=True
+    )
+    overall_distribution = overall_distribution.sort_values("Категория подлости")
     
-    # Цветовая схема для уровней подлости
     color_map = {
-        "Нет подлости": "#c0c0c0",  # серый
-        "Низкий уровень подлости": "#ffff7f",  # желтый
-        "Средний уровень подлости": "#ffaa7f",  # оранжевый
-        "Высокий уровень подлости": "#ff7f7f"   # красный
+        "Нет подлости": "#c0c0c0",
+        "Низкий уровень подлости": "#ffff7f",
+        "Средний уровень подлости": "#ffaa7f",
+        "Высокий уровень подлости": "#ff7f7f"
     }
     
-    # Создаем диаграмму
     fig = px.bar(
         overall_distribution,
         x="Категория подлости",
@@ -98,356 +77,245 @@ def display_trickiness_distribution(df, group_by_col=None):
         color_discrete_map=color_map,
         title="Распределение по уровням подлости"
     )
-    
-    # Форматируем подсказки
-    fig.update_traces(
-        hovertemplate="<b>%{x}</b><br>" +
-                      "Количество: %{y}"
-    )
-    
+    fig.update_traces(hovertemplate="<b>%{x}</b><br>Количество: %{y}")
     st.plotly_chart(fig, use_container_width=True)
-    
     return overall_distribution
 
 def update_display_metrics_row(df, group_by_col=None, compare_with=None):
-    """
-    Дополняет функцию display_metrics_row для отображения метрики подлости
-    
-    Args:
-        df: DataFrame с данными
-        group_by_col: Колонка для группировки (если None, используются все данные)
-        compare_with: DataFrame для сравнения (если указан, показывает дельту)
-    """
-    # Проверяем наличие колонки trickiness_level
     if "trickiness_level" not in df.columns:
         df["trickiness_level"] = df.apply(core.get_trickiness_level, axis=1)
-    
-    # Вычисляем средний уровень подлости
     if group_by_col is not None:
-        # Агрегируем данные по указанной колонке
-        df_agg = df.groupby(group_by_col).agg(
-            trickiness_avg=("trickiness_level", "mean")
-        ).reset_index()
-        
-        # Вычисляем средний уровень подлости
+        df_agg = df.groupby(group_by_col).agg(trickiness_avg=("trickiness_level", "mean")).reset_index()
         avg_trickiness = df_agg["trickiness_avg"].mean()
     else:
-        # Используем все данные
         avg_trickiness = df["trickiness_level"].mean()
-    
-    # Если есть данные для сравнения, вычисляем дельту
+    trickiness_delta = None
     if compare_with is not None and "trickiness_level" in compare_with.columns:
         trickiness_delta = avg_trickiness - compare_with["trickiness_level"].mean()
-    else:
-        trickiness_delta = None
-    
-    # Возвращаем результаты для дополнения отображения метрик
-    return {
-        "avg_trickiness": avg_trickiness,
-        "trickiness_delta": trickiness_delta
-    }
+    return {"avg_trickiness": avg_trickiness, "trickiness_delta": trickiness_delta}
 
-# Добавляем функцию для отображения метрики подлости
 def display_trickiness_metric(avg_trickiness, trickiness_delta=None):
-    """
-    Отображает метрику среднего уровня подлости
-    
-    Args:
-        avg_trickiness: Средний уровень подлости
-        trickiness_delta: Дельта относительно другого набора данных (опционально)
-    """
-    # Определяем цвет метрики в зависимости от уровня подлости
-    trickiness_color = "#4da6ff"  # Стандартный цвет метрики
-    
-    # Отображаем метрику подлости
     st.metric(
         "Средний уровень подлости", 
         f"{avg_trickiness:.2f}", 
         f"{trickiness_delta:.2f}" if trickiness_delta is not None else None, 
-        delta_color="inverse"  # Инвертируем цвет дельты (т.к. увеличение подлости - негативно)
+        delta_color="inverse"
     )
-    
-    # Дополнительная информация об интерпретации уровня подлости
-    trickiness_info = ""
-    if avg_trickiness < 0.5:
-        trickiness_info = "Низкий уровень подлости"
-    elif avg_trickiness < 1.5:
-        trickiness_info = "В основном низкий уровень"
-    elif avg_trickiness < 2.0:
-        trickiness_info = "Средний уровень подлости"
-    elif avg_trickiness < 2.5:
-        trickiness_info = "Преимущественно средний уровень"
-    else:
-        trickiness_info = "Высокий уровень подлости"
-    
-    # Возвращаем информацию для дополнительного отображения
-    return trickiness_info
+    if avg_trickiness < 0.5: return "Низкий уровень подлости"
+    if avg_trickiness < 1.5: return "В основном низкий уровень"
+    if avg_trickiness < 2.0: return "Средний уровень подлости"
+    if avg_trickiness < 2.5: return "Преимущественно средний уровень"
+    return "Высокий уровень подлости"
 
-# Функция для расчета распределения карточек по уровням подлости
 def get_trickiness_distribution(df):
-    """
-    Рассчитывает распределение карточек по уровням подлости
-    
-    Args:
-        df: DataFrame с данными
-        
-    Returns:
-        dict: Словарь с количеством карточек по уровням подлости
-    """
-    # Проверяем наличие колонки trickiness_level
     if "trickiness_level" not in df.columns:
         df["trickiness_level"] = df.apply(core.get_trickiness_level, axis=1)
-    
-    # Считаем количество карточек по уровням подлости
     trickiness_distribution = df["trickiness_level"].value_counts().to_dict()
-    
-    # Обеспечиваем наличие всех ключей
-    for level in range(4):  # 0, 1, 2, 3
-        if level not in trickiness_distribution:
-            trickiness_distribution[level] = 0
-    
-    # Возвращаем распределение
+    for level in range(4):
+        if level not in trickiness_distribution: trickiness_distribution[level] = 0
     return trickiness_distribution
 
 def display_metrics_row(df, group_by_col=None, compare_with=None):
-    """
-    Отображает ряд ключевых метрик для DataFrame
-    
-    Args:
-        df: DataFrame с данными
-        group_by_col: Колонка для группировки (если None, используются все данные)
-        compare_with: DataFrame для сравнения (если указан, показывает дельту)
-    """
+    if df is None or df.empty:
+        st.warning("Нет данных для отображения метрик.")
+        return {}
+    required_metrics_cols = ["success_rate", "complaint_rate", "discrimination_avg", "risk"]
+    if not all(col in df.columns for col in required_metrics_cols):
+        st.error(f"Отсутствуют необходимые колонки для отображения метрик: {required_metrics_cols}")
+        return {}
+
     if group_by_col is not None:
-        # Агрегируем данные по указанной колонке
-        df_agg = df.groupby(group_by_col).agg(
-            success_rate=("success_rate", "mean"),
-            complaint_rate=("complaint_rate", "mean"),
-            discrimination_avg=("discrimination_avg", "mean"),
-            risk=("risk", "mean"),
-            total_items=("card_id", "nunique")
-        ).reset_index()
-        
-        # Вычисляем средние метрики
+        agg_functions = {
+            "success_rate": "mean", "complaint_rate": "mean",
+            "discrimination_avg": "mean", "risk": "mean"
+        }
+        if "cards_count" in df.columns: agg_functions["total_items"] = ("cards_count", "sum")
+        elif "card_id" in df.columns: agg_functions["total_items"] = ("card_id", "nunique")
+        else: agg_functions["total_items"] = (df.columns[0], "count")
+        df_agg = df.groupby(group_by_col).agg(**agg_functions).reset_index()
         avg_success = df_agg["success_rate"].mean()
         avg_complaints = df_agg["complaint_rate"].mean()
         avg_discrimination = df_agg["discrimination_avg"].mean()
         avg_risk = df_agg["risk"].mean()
         total_items = df_agg["total_items"].sum()
     else:
-        # Используем все данные
-        avg_success = df["success_rate"].mean()
-        avg_complaints = df["complaint_rate"].mean()
-        avg_discrimination = df["discrimination_avg"].mean()
-        avg_risk = df["risk"].mean()
-        total_items = len(df["card_id"].unique())
-    
-    # Если есть данные для сравнения, вычисляем дельту
-    if compare_with is not None:
-        success_delta = avg_success - compare_with["success_rate"].mean()
-        complaints_delta = avg_complaints - compare_with["complaint_rate"].mean()
-        discrimination_delta = avg_discrimination - compare_with["discrimination_avg"].mean()
-        risk_delta = avg_risk - compare_with["risk"].mean()
-    else:
-        success_delta = None
-        complaints_delta = None
-        discrimination_delta = None
-        risk_delta = None
-    
-    # Отображаем метрики в ряд
+        avg_success, avg_complaints, avg_discrimination, avg_risk = np.nan, np.nan, np.nan, np.nan
+        if "success_rate" in df.columns and df["success_rate"].notna().any(): avg_success = df["success_rate"].mean()
+        if "complaint_rate" in df.columns and df["complaint_rate"].notna().any(): avg_complaints = df["complaint_rate"].mean()
+        if "discrimination_avg" in df.columns and df["discrimination_avg"].notna().any(): avg_discrimination = df["discrimination_avg"].mean()
+        if "risk" in df.columns and df["risk"].notna().any(): avg_risk = df["risk"].mean()
+        if "cards_count" in df.columns: total_items = df["cards_count"].sum()
+        elif "card_id" in df.columns: total_items = len(df["card_id"].unique())
+        else: total_items = len(df)
+
+    success_delta, complaints_delta, discrimination_delta, risk_delta = None, None, None, None
+    if compare_with is not None and not compare_with.empty:
+        if all(col in compare_with.columns for col in required_metrics_cols):
+            success_delta = avg_success - compare_with["success_rate"].mean()
+            complaints_delta = avg_complaints - compare_with["complaint_rate"].mean()
+            discrimination_delta = avg_discrimination - compare_with["discrimination_avg"].mean()
+            risk_delta = avg_risk - compare_with["risk"].mean()
+
     cols = st.columns(4)
-    
-    with cols[0]:
-        # Обратите внимание - первое значение (label) - это заголовок, второе (value) - это показатель метрики
-        st.metric(
-            "Средний успех", 
-            f"{avg_success:.1%}", 
-            f"{success_delta:.1%}" if success_delta is not None else None
-        )
-        
-    with cols[1]:
-        st.metric(
-            "Средний % жалоб", 
-            f"{avg_complaints:.1%}", 
-            f"{complaints_delta:.1%}" if complaints_delta is not None else None, 
-            delta_color="inverse"
-        )
-        
-    with cols[2]:
-        st.metric(
-            "Средняя дискриминативность", 
-            f"{avg_discrimination:.2f}", 
-            f"{discrimination_delta:.2f}" if discrimination_delta is not None else None
-        )
-        
-    with cols[3]:
-        st.metric(
-            "Средний риск", 
-            f"{avg_risk:.2f}", 
-            f"{risk_delta:.2f}" if risk_delta is not None else None, 
-            delta_color="inverse"
-        )
-    
-    # Отображаем дополнительные метрики во втором ряду
-    cols2 = st.columns(4)
-    
-    with cols2[0]:
-        st.metric("Всего элементов", f"{total_items:,}")
-    
-    # Вычисляем количество заданий с высоким риском
-    high_risk_count = len(df[df["risk"] > 0.7])
-    
-    with cols2[1]:
-        st.metric(
-            "Элементов высокого риска", 
-            f"{high_risk_count}", 
-            f"{high_risk_count/total_items:.1%} от общего числа", 
-            delta_color="inverse"
-        )
-    
-    # Добавляем метрики использования попыток, если доступны
+    cols[0].metric("Средний успех", f"{avg_success:.1%}" if pd.notna(avg_success) else "N/A", f"{success_delta:.1%}" if success_delta is not None and pd.notna(success_delta) else None)
+    cols[1].metric("Средний % жалоб", f"{avg_complaints:.1%}" if pd.notna(avg_complaints) else "N/A", f"{complaints_delta:.1%}" if complaints_delta is not None and pd.notna(complaints_delta) else None, delta_color="inverse")
+    cols[2].metric("Средняя дискриминативность", f"{avg_discrimination:.2f}" if pd.notna(avg_discrimination) else "N/A", f"{discrimination_delta:.2f}" if discrimination_delta is not None and pd.notna(discrimination_delta) else None)
+    cols[3].metric("Средний риск", f"{avg_risk:.2f}" if pd.notna(avg_risk) else "N/A", f"{risk_delta:.2f}" if risk_delta is not None and pd.notna(risk_delta) else None, delta_color="inverse")
+
     if "total_attempts" in df.columns and "attempted_share" in df.columns:
-        total_attempts = df["total_attempts"].sum()
-        avg_attempted = df["attempted_share"].mean()
-        
-        with cols2[2]:
-            st.metric("Всего попыток", f"{int(total_attempts):,}")
-            
-        with cols2[3]:
-            st.metric("Среднее участие", f"{avg_attempted:.1%}")
+        total_attempts_val, avg_attempted_val = np.nan, np.nan
+        if pd.api.types.is_numeric_dtype(df["total_attempts"]): total_attempts_val = df["total_attempts"].sum()
+        else: 
+            try: total_attempts_val = pd.to_numeric(df["total_attempts"], errors='coerce').sum()
+            except Exception: pass
+        if pd.api.types.is_numeric_dtype(df["attempted_share"]): avg_attempted_val = df["attempted_share"].mean()
+        else: 
+            try: avg_attempted_val = pd.to_numeric(df["attempted_share"], errors='coerce').mean()
+            except Exception: pass
+        cols_attempts = st.columns(2)
+        cols_attempts[0].metric("Всего попыток", f"{int(total_attempts_val):,}" if pd.notna(total_attempts_val) else "N/A")
+        cols_attempts[1].metric("Среднее участие", f"{avg_attempted_val:.1%}" if pd.notna(avg_attempted_val) else "N/A")
     
     return {
-        "avg_success": avg_success,
-        "avg_complaints": avg_complaints, 
-        "avg_discrimination": avg_discrimination,
-        "avg_risk": avg_risk,
-        "total_items": total_items,
-        "high_risk_count": high_risk_count
+        "avg_success": avg_success, "avg_complaints": avg_complaints,
+        "avg_discrimination": avg_discrimination, "avg_risk": avg_risk,
+        "total_items": total_items, "high_risk_count": None 
     }
 
 def display_status_chart(df, item_col=None):
-    """
-    Отображает круговую диаграмму распределения статусов
-    
-    Args:
-        df: DataFrame с данными 
-        item_col: Колонка для группировки (если None, используются все строки)
-    """
-    # Если указана колонка для группировки, агрегируем по ней
     if item_col is not None:
-        # Сначала определим преобладающий статус для каждого элемента
-        status_by_item = df.groupby(item_col)["status"].agg(
-            lambda x: x.mode().iloc[0] if not x.mode().empty else "unknown"
-        ).reset_index()
-        
+        status_by_item = df.groupby(item_col)["status"].agg(lambda x: x.mode().iloc[0] if not x.mode().empty else "unknown").reset_index()
         status_counts = status_by_item["status"].value_counts().reset_index()
     else:
-        # Используем все строки
         status_counts = df["status"].value_counts().reset_index()
-    
     status_counts.columns = ["Статус", "Количество"]
-    
-    # Создаем круговую диаграмму
     status_fig = px.pie(
-        status_counts,
-        values="Количество",
-        names="Статус",
-        title="Распределение по статусам",
-        color="Статус",
-        color_discrete_map={
-            "new": "#d3d3d3",
-            "in_work": "#add8e6",
-            "ready_for_qc": "#fffacd",
-            "done": "#90ee90",
-            "wont_fix": "#f08080",
-            "unknown": "#cccccc"
-        },
-        hole=0.4
+        status_counts, values="Количество", names="Статус", title="Распределение по статусам",
+        color="Статус", color_discrete_map={
+            "new": "#d3d3d3", "in_work": "#add8e6", "ready_for_qc": "#fffacd",
+            "done": "#90ee90", "wont_fix": "#f08080", "unknown": "#cccccc"
+        }, hole=0.4
     )
-    
     st.plotly_chart(status_fig, use_container_width=True)
 
 def display_risk_distribution(df, group_by_col=None):
-    """
-    Отображает распределение риска по категориям
-    
-    Args:
-        df: DataFrame с данными
-        group_by_col: Колонка для группировки (если None, используются все данные)
-    """
     if group_by_col is not None:
-        # Группируем данные по указанной колонке
         risk_categories = []
-        
-        for _, group in df.groupby(group_by_col):
+        risk_data = df[["risk", group_by_col]].copy()
+        if not pd.api.types.is_numeric_dtype(risk_data["risk"]):
+            risk_data["risk"] = pd.to_numeric(risk_data["risk"], errors='coerce')
+        risk_data.dropna(subset=['risk'], inplace=True)
+        for name, group in risk_data.groupby(group_by_col):
             avg_risk = group["risk"].mean()
-            name = group[group_by_col].iloc[0]
-            
-            if avg_risk < 0.25:                # Было 0.3
-                category = "Низкий риск"
-            elif avg_risk < 0.5:               # Остается 0.5
-                category = "Умеренный риск"    # Было "Средний риск"
-            elif avg_risk < 0.75:              # Было 0.7
-                category = "Высокий риск"
-            else:
-                category = "Критический риск"  # Было "Очень высокий риск"
-                
+            if pd.isna(avg_risk): continue
+            if avg_risk < 0.25: category = "Низкий риск"
+            elif avg_risk < 0.5: category = "Умеренный риск"
+            elif avg_risk < 0.75: category = "Высокий риск"
+            else: category = "Критический риск"
             risk_categories.append({"name": name, "risk": avg_risk, "category": category})
-        
+        if not risk_categories: 
+            st.info("Нет данных для отображения распределения риска по категориям.")
+            return
         risk_df = pd.DataFrame(risk_categories)
-        
-        # Вычисляем распределение риска по категориям
         risk_distribution = risk_df["category"].value_counts().reset_index()
         risk_distribution.columns = ["Категория риска", "Количество"]
-        
-        # Устанавливаем правильный порядок категорий
-        risk_order = ["Низкий риск", "Умеренный риск", "Высокий риск", "Критический риск"]  # Обновите порядок категорий
-        risk_distribution["Категория риска"] = pd.Categorical(
-            risk_distribution["Категория риска"], 
-            categories=risk_order, 
-            ordered=True
-        )
-        risk_distribution = risk_distribution.sort_values("Категория риска")
-        
-        color_map = {
-            "Низкий риск": "#7FFF7F",
-            "Умеренный риск": "#FFFF7F",   # Было "Средний риск"
-            "Высокий риск": "#FFAA7F",
-            "Критический риск": "#FF7F7F"  # Было "Очень высокий риск"
-        }
-        
-        # Создаем диаграмму
-        fig = px.bar(
-            risk_distribution,
-            x="Категория риска",
-            y="Количество",
-            color="Категория риска",
-            color_discrete_map=color_map,
-            title="Распределение по уровням риска"
-        )
-        
+        risk_order = ["Низкий риск", "Умеренный риск", "Высокий риск", "Критический риск"]
+        risk_distribution["Категория риска"] = pd.Categorical(risk_distribution["Категория риска"], categories=risk_order, ordered=True)
+        risk_distribution = risk_distribution.sort_values("Категория риска").dropna(subset=["Категория риска"])
+        color_map = {"Низкий риск": "#7FFF7F", "Умеренный риск": "#FFFF7F", "Высокий риск": "#FFAA7F", "Критический риск": "#FF7F7F"}
+        fig = px.bar(risk_distribution, x="Категория риска", y="Количество", color="Категория риска", color_discrete_map=color_map, title="Распределение по уровням риска")
         st.plotly_chart(fig, use_container_width=True)
     else:
-        # Если нет группировки, показываем гистограмму риска
-        fig = px.histogram(
-            df,
-            x="risk",
-            nbins=20,
-            color_discrete_sequence=["#FF9F7F"],
-            labels={"risk": "Риск", "count": "Количество"},
-            title="Распределение риска"
-        )
-        
-        # Добавляем вертикальные линии для границ категорий
-        fig.add_vline(x=0.25, line_dash="dash", line_color="green",         # Было 0.3
-                      annotation_text="Низкий", annotation_position="top")
-        fig.add_vline(x=0.5, line_dash="dash", line_color="yellow",         # Остается 0.5
-                      annotation_text="Умеренный", annotation_position="top") # Было "Средний"
-        fig.add_vline(x=0.75, line_dash="dash", line_color="red",           # Было 0.7
-                      annotation_text="Высокий", annotation_position="top")
-        
-        # Добавьте дополнительную линию для критического риска
-        fig.add_vline(x=0.75, line_dash="dash", line_color="darkred",
-                      annotation_text="Критический", annotation_position="top")
-        
+        risk_data_hist = df["risk"].copy()
+        if not pd.api.types.is_numeric_dtype(risk_data_hist):
+            risk_data_hist = pd.to_numeric(risk_data_hist, errors='coerce')
+        risk_data_hist.dropna(inplace=True)
+        if risk_data_hist.empty:
+            st.info("Нет данных для отображения гистограммы риска.")
+            return
+        fig = px.histogram(risk_data_hist, nbins=20, color_discrete_sequence=["#FF9F7F"], labels={"value": "Риск", "count": "Количество"}, title="Распределение риска")
+        fig.add_vline(x=0.25, line_dash="dash", line_color="green", annotation_text="Низкий", annotation_position="top left")
+        fig.add_vline(x=0.5, line_dash="dash", line_color="#CCCC00", annotation_text="Умеренный", annotation_position="top left")
+        fig.add_vline(x=0.75, line_dash="dash", line_color="red", annotation_text="Высокий", annotation_position="top right")
         st.plotly_chart(fig, use_container_width=True)
+
+def display_overall_card_risk_stats():
+    """
+    Отображает общую статистику по уровням риска всех карточек в card_risk_cache.
+    Выполняет SQL-запрос с использованием get_cloud_dsn() из db_config.
+    """
+    query_sql = text("""
+    SELECT
+        COUNT(*) as total_cards,
+        COALESCE(SUM(CASE WHEN risk IS NULL OR risk = 0 THEN 1 ELSE 0 END), 0) as no_risk_count,
+        COALESCE(SUM(CASE WHEN risk > 0 AND risk <= 0.25 THEN 1 ELSE 0 END), 0) as low_risk_count,
+        COALESCE(SUM(CASE WHEN risk > 0.25 AND risk <= 0.5 THEN 1 ELSE 0 END), 0) as moderate_risk_count,
+        COALESCE(SUM(CASE WHEN risk > 0.5 AND risk <= 0.75 THEN 1 ELSE 0 END), 0) as high_risk_count,
+        COALESCE(SUM(CASE WHEN risk > 0.75 THEN 1 ELSE 0 END), 0) as critical_risk_count
+    FROM card_risk_cache;
+    """)
+    
+    st.subheader("📊 Распределение рисков по всем карточкам")
+
+    try:
+        dsn = get_cloud_dsn()
+        if not dsn:
+            st.error("DSN для подключения к базе данных не получен.")
+            return
+            
+        engine = create_engine(dsn)
+        with engine.connect() as connection:
+            df_risks = pd.read_sql_query(query_sql, connection)
+
+        if not df_risks.empty and df_risks.iloc[0] is not None:
+            results = df_risks.iloc[0]
+            total_cards = int(results.get('total_cards', 0))
+            no_risk_count = int(results.get('no_risk_count', 0))
+            low_risk_count = int(results.get('low_risk_count', 0))
+            moderate_risk_count = int(results.get('moderate_risk_count', 0))
+            high_risk_count = int(results.get('high_risk_count', 0))
+            critical_risk_count = int(results.get('critical_risk_count', 0))
+
+            if total_cards > 0:
+                no_risk_perc = (no_risk_count / total_cards) * 100
+                low_risk_perc = (low_risk_count / total_cards) * 100
+                moderate_risk_perc = (moderate_risk_count / total_cards) * 100
+                high_risk_perc = (high_risk_count / total_cards) * 100
+                critical_risk_perc = (critical_risk_count / total_cards) * 100
+            else:
+                no_risk_perc = low_risk_perc = moderate_risk_perc = high_risk_perc = critical_risk_perc = 0
+
+            cols_risk_cards = st.columns(5)
+            with cols_risk_cards[0]:
+                delta_val_no_risk = f"{no_risk_perc:.1f}%" if total_cards > 0 else None
+                st.metric(label="Без риска", value=f"{no_risk_count:,}", delta=delta_val_no_risk)
+            with cols_risk_cards[1]:
+                delta_val_low = f"{low_risk_perc:.1f}%" if total_cards > 0 else None
+                st.metric(label="Низкий риск", value=f"{low_risk_count:,}", delta=delta_val_low)
+            with cols_risk_cards[2]:
+                delta_val_mod = f"{moderate_risk_perc:.1f}%" if total_cards > 0 else None
+                st.metric(label="Умеренный риск", value=f"{moderate_risk_count:,}", delta=delta_val_mod)
+            with cols_risk_cards[3]:
+                delta_val_high = f"{high_risk_perc:.1f}%" if total_cards > 0 else None
+                st.metric(label="Высокий риск", value=f"{high_risk_count:,}", delta=delta_val_high, delta_color="inverse")
+            with cols_risk_cards[4]:
+                delta_val_crit = f"{critical_risk_perc:.1f}%" if total_cards > 0 else None
+                st.metric(label="Критический риск", value=f"{critical_risk_count:,}", delta=delta_val_crit, delta_color="inverse")
+        else:
+            st.warning("Данные о распределении рисков карточек не получены или пусты.")
+            
+    except ImportError as ie:
+        st.error(f"Ошибка импорта для работы с БД: {ie}. Установите необходимые библиотеки (например, psycopg2-binary, sqlalchemy).")    
+    except Exception as e:
+        st.error(f"Ошибка при подключении к БД или выполнении запроса для статистики рисков: {e}")
+
+__all__ = [
+    'display_trickiness_distribution',
+    'update_display_metrics_row',
+    'display_trickiness_metric',
+    'get_trickiness_distribution',
+    'display_metrics_row',
+    'display_status_chart',
+    'display_risk_distribution',
+    'display_overall_card_risk_stats'
+]

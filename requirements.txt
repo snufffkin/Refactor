@@ -22,4 +22,6 @@ pyzmq>=25.0.0
 sentencepiece>=0.1.99
 tiktoken>=0.6.0
 watchfiles>=0.20.0
-sentence-transformers>=2.6.0 
+sentence-transformers>=2.6.0
+pandas==2.1.4
+openpyxl==3.1.2 

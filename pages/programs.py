@@ -8,6 +8,8 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
+import psycopg2 # Добавлено для работы с БД
+from db_config import get_cloud_dsn # Добавлено для подключения к БД
 
 import core
 from components.utils import create_hierarchical_header, display_clickable_items
@@ -17,9 +19,82 @@ import navigation_utils
 
 def page_programs(df: pd.DataFrame):
     """Страница программы с детализацией по модулям"""
+    print(f"[page_programs] В начале: filter_program = {st.session_state.get('filter_program')}")
+    print(f"[page_programs] Входной DataFrame df is None: {df is None}, df is empty: {df.empty if df is not None else 'N/A'}")
+
+    if df is None or df.empty:
+        st.warning("Нет данных о модулях для отображения.")
+        return
+
+    # Функция для получения статуса программы из БД
+    @st.cache_data(ttl=300) # Кэшируем результат на 5 минут
+    def get_program_status(program_name_to_find: str):
+        conn = None
+        try:
+            dsn = get_cloud_dsn()
+            conn = psycopg2.connect(dsn)
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT program_id, program_active_status FROM program_ids WHERE program_name = %s",
+                (program_name_to_find,)
+            )
+            result = cur.fetchone()
+            cur.close()
+            if result:
+                return result[0], result[1] # program_id, program_active_status
+            return None, None
+        except psycopg2.Error as e:
+            st.error(f"Ошибка подключения к БД или выполнения запроса: {e}")
+            return None, None
+        finally:
+            if conn:
+                conn.close()
+
+    # Переименование столбцов из mv_module_stats в ожидаемый формат
+    column_mapping = {
+        "avg_success_rate": "success_rate",
+        "avg_first_try_success_rate": "first_try_success_rate",
+        "avg_complaint_rate": "complaint_rate",
+        "avg_discrimination": "discrimination_avg", # Имя совпадает
+        "avg_risk": "risk",
+        "avg_time_median": "time_median",
+        # total_gz будет использован для cards_count
+    }
+    df = df.rename(columns=column_mapping)
+
+    # Создание cards_count на основе total_gz или длины gz_ids
+    if 'total_gz' in df.columns:
+        df['cards_count'] = df['total_gz']
+    elif 'gz_ids' in df.columns:
+        df['cards_count'] = df['gz_ids'].apply(lambda x: len(x) if isinstance(x, (list, np.ndarray)) else 0)
+    else:
+        df['cards_count'] = 0 # По умолчанию, если нет данных для подсчета
+
     # Фильтруем данные по выбранной программе
-    df_prog = core.apply_filters(df, ["program"])
     prog_name = st.session_state.get('filter_program')
+    if not prog_name:
+        st.warning("Программа не выбрана. Пожалуйста, выберите программу на странице обзора.")
+        # Можно показать список всех программ для выбора или перенаправить
+        # Отображение всех модулей всех программ, если программа не выбрана (менее предпочтительно)
+        # df_prog = df
+        return 
+    
+    # Получаем статус программы
+    program_id, program_active_status = get_program_status(prog_name)
+
+    # Отображаем значок статуса программы
+    if program_active_status is not None:
+        if program_active_status:
+            st.badge("Программа активна", icon=":material/check_circle:", color="green")
+        else:
+            st.badge("Программа не активна", icon=":material/cancel:", color="red")
+    else:
+        # Если статус не удалось получить, можно вывести сообщение или ничего не делать
+        # st.caption("Статус программы не определен")
+        pass # Не выводим ничего, если статус не получен
+
+    # Применяем фильтр программы к уже переименованному df
+    df_prog = df[df["program_name"] == prog_name].copy() # Используем program_name из mv_module_stats
     
     # Создаем иерархический заголовок
     create_hierarchical_header(
@@ -34,47 +109,54 @@ def page_programs(df: pd.DataFrame):
     
     # 1. Отображаем общие метрики программы
     st.subheader("📈 Метрики программы")
-    display_metrics_row(df_prog, compare_with=df)
+    # Для compare_with также нужно передать df с переименованными колонками и cards_count
+    # display_metrics_row(df_prog, compare_with=df) 
+    # Пока уберем compare_with, чтобы упростить, или нужно убедиться, что df правильно подготовлен
+    display_metrics_row(df_prog) 
     
     # Добавляем метрику среднего суммарного времени на урок
-    lessons_data = df_prog.groupby("lesson").agg(
-        total_time_median=("time_median", "sum")
-    ).reset_index()
-    
-    avg_time_per_lesson = lessons_data["total_time_median"].mean() if not lessons_data.empty else 0
-    avg_time_per_lesson = avg_time_per_lesson / 60
-    # Отображаем метрику времени
-    st.subheader("⏱️ Среднее время на урок")
-    st.metric(
-        label="Среднее суммарное время на урок (мин)",
-        value=f"{avg_time_per_lesson:.1f}"
-    )
+    # Эта логика специфична для уроков, а у нас данные модулей.
+    # Пересмотрим или уберем.
+    # Если есть time_median (среднее для модуля) и total_lessons (в модуле)
+    if 'time_median' in df_prog.columns and 'total_lessons' in df_prog.columns and not df_prog.empty:
+        # Расчет среднего времени на урок для выбранной программы
+        # Суммируем общее время по всем модулям программы и делим на общее кол-во уроков
+        total_time_all_modules = (df_prog['time_median'] * df_prog['total_lessons']).sum()
+        total_lessons_in_program = df_prog['total_lessons'].sum()
+        avg_time_per_lesson_in_program = (total_time_all_modules / total_lessons_in_program) / 60 if total_lessons_in_program > 0 else 0
+        
+        st.subheader("⏱️ Среднее время на урок в программе")
+        st.metric(
+            label="Среднее время на урок (мин)",
+            value=f"{avg_time_per_lesson_in_program:.1f}"
+        )
     
     # 2. Отображаем распределение риска и статусы
     col1, col2 = st.columns(2)
     
     with col1:
-        display_risk_distribution(df_prog, "module")
+        display_risk_distribution(df_prog, "module_name")
     
     with col2:
-        display_status_chart(df_prog, "module")
+        # display_status_chart(df_prog, "module_name") # Закомментировано, т.к. status отсутствует
+        st.info("Данные о статусах модулей/карточек недоступны на этом уровне.")
     
     # 3. Визуализируем модули в виде столбчатой диаграммы
     st.subheader("📊 Модули программы")
     
     # Агрегируем данные по модулям
-    agg = df_prog.groupby("module").agg(
+    agg = df_prog.groupby("module_name").agg(
         risk=("risk", "mean"),
         success=("success_rate", "mean"),
         complaints=("complaint_rate", "mean"),
         discrimination=("discrimination_avg", "mean"),
-        cards=("card_id", "nunique")
+        cards=("cards_count", "sum") # Используем cards_count
     ).reset_index()
     
-    # Сортируем модули по порядку, если есть такая колонка
+    # Сортируем модули по порядку
     if "module_order" in df_prog.columns:
-        module_order = df_prog.groupby("module")["module_order"].first().reset_index()
-        agg = agg.merge(module_order, on="module", how="left")
+        module_order = df_prog.groupby("module_name")["module_order"].first().reset_index()
+        agg = agg.merge(module_order, on="module_name", how="left")
         agg = agg.sort_values("module_order")
     else:
         # Если нет колонки с порядком, сортируем по риску
@@ -93,7 +175,7 @@ def page_programs(df: pd.DataFrame):
         color_continuous_scale="RdYlGn_r",
         labels={"module_num": "Номер модуля", "risk": "Риск"},
         title="Уровень риска по модулям",
-        hover_data=["module", "success", "complaints", "discrimination", "cards"]  # Добавляем реальное название в подсказку
+        hover_data=["module_name", "success", "complaints", "discrimination", "cards"]  # Добавляем реальное название в подсказку
     )
     
     # Добавляем горизонтальные линии для границ категорий риска
@@ -130,11 +212,11 @@ def page_programs(df: pd.DataFrame):
     
     with tab1:
         # График зависимости успешности и жалоб
-        display_success_complaints_chart(df_prog, "module")
+        display_success_complaints_chart(df_prog, "module_name")
     
     with tab2:
-        # График сравнения нескольких метрик - используем нумерацию вместо ID
-        agg_metrics = df_prog.groupby("module").agg(
+        # График сравнения нескольких метрик
+        agg_metrics = df_prog.groupby("module_name").agg(
             success_rate=("success_rate", "mean"),
             complaint_rate=("complaint_rate", "mean"),
             discrimination_avg=("discrimination_avg", "mean"),
@@ -143,8 +225,8 @@ def page_programs(df: pd.DataFrame):
         
         # Добавляем последовательную нумерацию 
         if "module_order" in df_prog.columns:
-            module_order = df_prog.groupby("module")["module_order"].first().reset_index()
-            agg_metrics = agg_metrics.merge(module_order, on="module", how="left")
+            module_order = df_prog.groupby("module_name")["module_order"].first().reset_index()
+            agg_metrics = agg_metrics.merge(module_order, on="module_name", how="left")
             agg_metrics = agg_metrics.sort_values("module_order")
         else:
             agg_metrics = agg_metrics.sort_values("risk", ascending=False)
@@ -158,7 +240,7 @@ def page_programs(df: pd.DataFrame):
         # Переводим в формат "длинных данных" для графика
         melted_df = pd.melt(
             agg_metrics,
-            id_vars=["module", "module_num"],
+            id_vars=["module_name", "module_num"],
             value_vars=["success_rate", "complaint_rate", "discrimination_avg", "risk"],
             var_name="metric",
             value_name="value"
@@ -180,7 +262,7 @@ def page_programs(df: pd.DataFrame):
             y="value",
             color="metric_name",
             barmode="group",
-            hover_data=["module"],  # Показываем реальное название в подсказке
+            hover_data=["module_name"],  # Показываем реальное название в подсказке
             labels={
                 "module_num": "Номер модуля",
                 "value": "Значение",
@@ -201,7 +283,7 @@ def page_programs(df: pd.DataFrame):
     st.subheader("📋 Детальная информация по модулям")
     
     # Улучшенная таблица с модулями, добавляем номер для соответствия с графиком
-    detailed_df = agg[["module_num", "module", "risk", "success", "complaints", "discrimination", "cards"]]
+    detailed_df = agg[["module_num", "module_name", "risk", "success", "complaints", "discrimination", "cards"]]
     detailed_df.columns = ["Номер", "Модуль", "Риск", "Успешность", "Жалобы", "Дискриминативность", "Карточек"]
     
     st.dataframe(
@@ -219,7 +301,11 @@ def page_programs(df: pd.DataFrame):
     
     # 6. Список модулей с кликабельными ссылками
     st.subheader("📚 Список модулей")
-    display_clickable_items(df_prog, "module", "module", metrics=["cards", "risk", "success"])
+    # display_clickable_items(df_prog, "module_name", "module", metrics=["cards", "risk", "success"])
+    # display_clickable_items теперь ожидает cards_count или card_id внутри себя.
+    # Передаем df_prog, который уже содержит cards_count и переименованные метрики.
+    # Метрики, которые мы хотим видеть: 'cards_count', 'risk', 'success_rate'
+    display_clickable_items(df_prog, "module_name", "module", metrics=["cards_count", "risk", "success_rate"]) 
     
     # 7. Если модуль выбран, показываем встроенную страницу уроков
     if st.session_state.get("filter_module"):

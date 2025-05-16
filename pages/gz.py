@@ -17,17 +17,43 @@ from components.metrics import display_metrics_row, display_status_chart, displa
 from components.charts import display_cards_chart, display_risk_bar_chart, display_metrics_comparison, display_success_complaints_chart, display_completion_radar, display_trickiness_chart, display_trickiness_success_chart
 import navigation_utils
 
-def page_gz(df: pd.DataFrame, create_link_fn=None):
+def page_gz(df_cards_input: pd.DataFrame, create_link_fn=None):
     """Страница группы заданий с детализацией по карточкам"""
-    # Фильтруем данные по выбранной программе, модулю, уроку и группе заданий
-    df_gz = core.apply_filters(df, ["program", "module", "lesson", "gz"])
     prog_name = st.session_state.get('filter_program')
     module_name = st.session_state.get('filter_module')
     lesson_name = st.session_state.get('filter_lesson')
     gz_name = st.session_state.get('filter_gz')
+
+    if not prog_name or not module_name or not lesson_name or not gz_name:
+        st.warning("Фильтры программы, модуля, урока или ГЗ не установлены.")
+        return
+
+    if df_cards_input is None or df_cards_input.empty:
+        st.warning("Нет данных о карточках для отображения.")
+        return
+
+    # df_cards_input - это результат core.load_card_data, который уже должен быть отфильтрован
+    # по program, module, lesson, gz (если gz передавался как gz_name)
+    # Убедимся, что в df_cards_input есть нужные колонки для проверки фильтров
+    # и что данные действительно соответствуют текущим фильтрам.
+    # Колонки типа program_name, module_name и т.д. должны приходить из cards_structure через JOIN в load_card_data
+    
+    # Проверяем, есть ли необходимые колонки для фильтрации в df_cards_input
+    required_filter_cols = ["program_name", "module_name", "lesson_name", "gz_name"]
+    if not all(col in df_cards_input.columns for col in required_filter_cols):
+        missing_cols = [col for col in required_filter_cols if col not in df_cards_input.columns]
+        st.error(f"Входные данные для страницы ГЗ не содержат необходимых колонок для проверки фильтров: {missing_cols}. Доступные: {df_cards_input.columns.tolist()}")
+        return
+
+    df_gz = df_cards_input[
+        (df_cards_input["program_name"] == prog_name) &
+        (df_cards_input["module_name"] == module_name) &
+        (df_cards_input["lesson_name"] == lesson_name) &
+        (df_cards_input["gz_name"] == gz_name)
+    ].copy()
     
     if df_gz.empty:
-        st.warning(f"Нет данных для ГЗ '{gz_name}' в уроке '{lesson_name}', модуль '{module_name}', программа '{prog_name}'")
+        st.warning(f"Нет данных для ГЗ '{gz_name}' в уроке '{lesson_name}', модуль '{module_name}', программа '{prog_name}'. Проверьте, что данные были корректно загружены для этого уровня.")
         return
     
     # Создаем иерархический заголовок с кликабельными ссылками
@@ -38,18 +64,18 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
     
     # 1. Метрики группы заданий
     st.subheader("📈 Метрики группы заданий")
-    df_lesson = df[(df["program"] == prog_name) & (df["module"] == module_name) & (df["lesson"] == lesson_name)]
-    display_metrics_row(df_gz, compare_with=df_lesson)
+    display_metrics_row(df_gz)
     
     # Добавляем метрику суммарного времени на ГЗ
-    total_time = df_gz["time_median"].sum()
-    total_time = total_time / 60
-    # Отображаем метрику времени
-    st.subheader("⏱️ Суммарное время на ГЗ")
-    st.metric(
-        label="Суммарное время на группу заданий (мин)",
-        value=f"{total_time:.1f}"
-    )
+    if "time_median" in df_gz.columns and not df_gz.empty:
+        total_time = df_gz["time_median"].sum() / 60
+        st.subheader("⏱️ Суммарное время на ГЗ")
+        st.metric(
+            label="Суммарное время на группу заданий (мин)",
+            value=f"{total_time:.1f}"
+        )
+    else:
+        st.info("Данные о времени выполнения карточек (time_median) отсутствуют.")
     
     # 2. Отображаем распределение риска и статусы
     col1, col2 = st.columns(2)
@@ -58,19 +84,29 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
         display_risk_distribution(df_gz)
     
     with col2:
-        display_status_chart(df_gz)
+        if "status" in df_gz.columns:
+            display_status_chart(df_gz)
+        else:
+            st.info("Данные о статусах карточек отсутствуют.")
     
     # 3. Подготовка данных для визуализации
     st.subheader("📊 Карточки в группе заданий")
     
-    # Проверяем наличие колонки trickiness_level
-    if "trickiness_level" not in df_gz.columns:
+    # Проверяем наличие колонки trickiness_level, если нет, вычисляем (если core.get_trickiness_level доступна)
+    if "trickiness_level" not in df_gz.columns and hasattr(core, 'get_trickiness_level'):
+        # Эта операция может быть долгой, если core.get_trickiness_level не векторизована и применяется к большому df_gz
+        # Возможно, это поле должно приходить уже рассчитанным из core.load_card_data
+        st.warning("Вычисляем trickiness_level... Это может занять некоторое время.")
         df_gz["trickiness_level"] = df_gz.apply(core.get_trickiness_level, axis=1)
+    elif "trickiness_level" not in df_gz.columns:
+        df_gz["trickiness_level"] = 0 # Значение по умолчанию, если рассчитать нельзя
         
-    # Добавляем разницу между общей успешностью и успехом с первой попытки
-    df_gz["success_diff"] = df_gz["success_rate"] - df_gz["first_try_success_rate"]
+    # Добавляем разницу между общей успешностью и успехом с первой попытки, если есть обе колонки
+    if "success_rate" in df_gz.columns and "first_try_success_rate" in df_gz.columns:
+        df_gz["success_diff"] = df_gz["success_rate"] - df_gz["first_try_success_rate"]
+    else:
+        df_gz["success_diff"] = 0.0
     
-    # Копируем данные для дальнейшей обработки
     df_cards = df_gz.copy()
     
     # Обработка card_order
@@ -427,7 +463,9 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
                 # Отображаем таблицу
                 st.dataframe(display_df, hide_index=True, use_container_width=True)
                 # Кнопки для перехода к детальному анализу трики-карточек
-                for _, row in tricky_cards.iterrows():
+                # Удаляем дубликаты по card_id перед генерацией кнопок
+                unique_tricky_cards_for_buttons = tricky_cards.drop_duplicates(subset=['card_id'], keep='first')
+                for _, row in unique_tricky_cards_for_buttons.iterrows():
                     card_id = int(row["card_id"])
                     if st.button(f"Перейти к карточке {card_id}", key=f"gz_tricky_nav_{card_id}"):
                         # Навигация без сброса сессии
@@ -515,7 +553,9 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
             # Отображаем таблицу
             st.dataframe(display_df, hide_index=True, use_container_width=True)
             # Кнопки для перехода к детальному анализу карточек
-            for _, row in low_discr_cards.iterrows():
+            # Удаляем дубликаты по card_id перед генерацией кнопок
+            unique_low_discr_cards_for_buttons = low_discr_cards.drop_duplicates(subset=['card_id'], keep='first')
+            for _, row in unique_low_discr_cards_for_buttons.iterrows():
                 card_id = int(row['card_id'])
                 if st.button(f"Перейти к карточке {card_id}", key=f"gz_lowdiscr_nav_list_{card_id}"):
                     # Навигация без сброса сессии
@@ -564,7 +604,9 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
     # Отображаем таблицу
     st.dataframe(display_df, hide_index=True, use_container_width=True)
     # Кнопки для перехода к детальному анализу карточек
-    for _, row in cards_df.iterrows():
+    # Удаляем дубликаты по card_id перед генерацией кнопок
+    unique_cards_df_for_buttons = cards_df.drop_duplicates(subset=['card_id'], keep='first')
+    for _, row in unique_cards_df_for_buttons.iterrows():
         card_id = int(row['card_id'])
         card_order = int(row['card_order'])
         if st.button(f"Перейти к карточке {card_id} (№{card_order})", key=f"gz_detail_nav_{card_id}"):
@@ -599,10 +641,11 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
     
     # Создаем список трики-карточек
     tricky_cards = df_cards[df_cards["trickiness_level"] > 0].sort_values("card_order")
+    unique_tricky_cards_for_buttons_list = tricky_cards.drop_duplicates(subset=['card_id'], keep='first')
     
-    if not tricky_cards.empty:
+    if not unique_tricky_cards_for_buttons_list.empty:
         st.markdown("### Трики-карточки")
-        for _, card in tricky_cards.iterrows():
+        for _, card in unique_tricky_cards_for_buttons_list.iterrows():
             card_id = int(card["card_id"])
             trickiness = card.get("trickiness_level", 0)
             card_order = int(card["card_order"])
@@ -612,15 +655,16 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
                 navigation_utils.navigate_to("cards", card_id=str(card_id))
                 st.rerun()
         # Отображаем оставшиеся карточки при большом числе
-        if len(tricky_cards) > 12:
-            st.info(f"И еще {len(tricky_cards) - 12} карточек...")
+        if len(unique_tricky_cards_for_buttons_list) > 12:
+            st.info(f"И еще {len(unique_tricky_cards_for_buttons_list) - 12} карточек...")
     
     # Создаем список карточек с низкой дискриминативностью
     low_discr_cards = df_cards[df_cards["discrimination_avg"] < 0.15].sort_values("card_order")
+    unique_low_discr_cards_for_buttons_list = low_discr_cards.drop_duplicates(subset=['card_id'], keep='first')
     
-    if not low_discr_cards.empty:
+    if not unique_low_discr_cards_for_buttons_list.empty:
         st.markdown("### Карточки с низкой дискриминативностью")
-        for _, card in low_discr_cards.iterrows():
+        for _, card in unique_low_discr_cards_for_buttons_list.iterrows():
             card_id = int(card["card_id"])
             discr = card["discrimination_avg"]
             card_order = int(card["card_order"])
@@ -629,8 +673,8 @@ def page_gz(df: pd.DataFrame, create_link_fn=None):
             if st.button(f"№{card_order}: ID {card_id} - Дискр.: {discr:.2f} - {card['card_type']}", key=key):
                 navigation_utils.navigate_to("cards", card_id=str(card_id))
                 st.rerun()
-        if len(low_discr_cards) > 12:
-            st.info(f"И еще {len(low_discr_cards) - 12} карточек...")
+        if len(unique_low_discr_cards_for_buttons_list) > 12:
+            st.info(f"И еще {len(unique_low_discr_cards_for_buttons_list) - 12} карточек...")
 
 def _page_gz_inline(df: pd.DataFrame):
     """Встроенная версия страницы групп заданий для отображения на странице урока"""

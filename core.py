@@ -40,18 +40,23 @@ def load_raw_data(_engine):
     """
     sql = text(
         """
-        SELECT c.program, c.module, c.module_order, c.lesson, c.lesson_order,
-               c.gz, c.gz_id, c.card_id, c.card_type, c.card_url,
-               c.total_attempts, c.attempted_share, c.success_rate, c.first_try_success_rate,
-               c.complaint_rate, c.complaints_total, c.discrimination_avg, c.success_attempts_rate,
-               c.time_median, c.complaints_text,
-               c.status, c.updated_at
-        FROM cards_mv c
+        SELECT 
+            cs.program_name, cs.module_name, cs.module_order, 
+            cs.lesson_name, cs.lesson_order,
+            cs.gz_name, cs.gz_id, cs.card_id, cs.card_type, cs.card_url,
+            cm.total_attempts, cm.attempted_share, cm.success_rate, 
+            cm.first_try_success_rate, cm.complaint_rate, cm.complaints_total,
+            cm.discrimination_avg, cm.success_attempts_rate, cm.time_median,
+            cm.complaints_text,
+            cst.status, cst.updated_at
+        FROM cards_structure cs
+        LEFT JOIN cards_metrics cm ON cs.card_id = cm.card_id
+        LEFT JOIN card_status cst ON cs.card_id = cst.card_id
         """
     )
     return pd.read_sql(sql, _engine)
 
-@st.cache_data(ttl=300)  # Кэширование на 5 минут (300 секунд)
+@st.cache_data(ttl=300)  # Кэширование на 5 минут
 def process_data(raw_data, use_parallel=False, max_workers=4):
     """
     Обрабатывает сырые данные, добавляя вычисляемые метрики.
@@ -135,7 +140,7 @@ def load_data(_engine, max_workers=4):
 
 # ---------------- Filters / Risk ------------------------------------------ #
 
-FILTERS: List[str] = ["program", "module", "lesson", "gz"]  # Добавил "gz" в список фильтров
+FILTERS: List[str] = ["program_name", "module_name", "lesson_name", "gz_name"]  # Обновлены названия полей
 
 # Обновленная функция расчета риска на основе интервалов
 # Добавьте эти функции в файл core.py
@@ -630,16 +635,39 @@ def calculate_risk_score(df):
     return adjusted_risk
 
 def apply_filters(df: pd.DataFrame, upto: Optional[List[str]] = None) -> pd.DataFrame:
+    """
+    Применяет фильтры к DataFrame.
+    
+    Args:
+        df: DataFrame для фильтрации
+        upto: Список фильтров для применения (если None, используются все фильтры)
+        
+    Returns:
+        Отфильтрованный DataFrame
+    """
     cols = FILTERS if upto is None else upto
     for col in cols:
         v = st.session_state.get(f"filter_{col}")
         if v:
-            df = df[df[col] == v]
+            actual_col_name = col 
+            if col not in df.columns and f"{col}_name" in df.columns:
+                actual_col_name = f"{col}_name"
+            
+            if actual_col_name in df.columns:
+                df = df[df[actual_col_name] == v]
+            else:
+                # Можно добавить логирование или предупреждение, если столбец не найден
+                # print(f"Предупреждение: Столбец '{col}' или '{f"{col}_name"}' не найден для фильтрации. Фильтр пропущен.")
+                pass # Пропустить фильтрацию, если столбец не существует
     return df
 
-
 def reset_child(level: str):
-    """Сбрасывает дочерние фильтры относительно указанного уровня."""
+    """
+    Сбрасывает дочерние фильтры относительно указанного уровня.
+    
+    Args:
+        level: Уровень, относительно которого сбрасываются фильтры
+    """
     if level not in FILTERS:
         return
     
@@ -650,6 +678,16 @@ def reset_child(level: str):
 # ---------------- Aggregation --------------------------------------------- #
 
 def agg_by(df: pd.DataFrame, level: str) -> pd.DataFrame:
+    """
+    Агрегирует данные по указанному уровню.
+    
+    Args:
+        df: DataFrame для агрегации
+        level: Уровень агрегации (одно из полей FILTERS)
+        
+    Returns:
+        Агрегированный DataFrame
+    """
     return (df.groupby(level)
               .agg(success=("success_rate","mean"),
                    complaints=("complaint_rate","mean"),
@@ -666,20 +704,31 @@ def save_status_changes(original: pd.DataFrame, edited: pd.DataFrame, engine):
         for _, row in diff.iterrows():
             conn.execute(
                 text("""
-                INSERT INTO card_status(card_id,status,updated_by,updated_at)
-                VALUES (:cid,:st,:by,:ts)
+                INSERT INTO card_status(card_id, status, updated_by, updated_at)
+                VALUES (:cid, :st, :by, :ts)
                 ON CONFLICT(card_id) DO UPDATE SET
-                  status=EXCLUDED.status,
-                  updated_by=EXCLUDED.updated_by,
-                  updated_at=EXCLUDED.updated_at;
+                  status = EXCLUDED.status,
+                  updated_by = EXCLUDED.updated_by,
+                  updated_at = EXCLUDED.updated_at;
                 """),
-                {"cid": int(row.card_id), "st": row.status, "by": st.session_state.get("user","demo"), "ts": datetime.utcnow()},
+                {
+                    "cid": int(row.card_id), 
+                    "st": row.status, 
+                    "by": st.session_state.get("user", "demo"), 
+                    "ts": datetime.utcnow().isoformat()
+                },
             )
 
 # ---------------- UI helper ------------------------------------------------ #
 
 def clickable(label: str, level: str) -> None:
-    """Создает кликабельную ссылку с переходом на соответствующий уровень иерархии."""
+    """
+    Создает кликабельную ссылку с переходом на соответствующий уровень иерархии.
+    
+    Args:
+        label: Текст ссылки
+        level: Уровень иерархии для перехода
+    """
     if label is None:
         return
     
@@ -786,13 +835,7 @@ def risk_score(row):
 def load_program_data(_engine=None):
     """
     Загружает агрегированные данные на уровне программ.
-    Использует материализованное представление mv_program_risk.
-    
-    Args:
-        _engine: SQLAlchemy engine для подключения к БД (не хешируемый параметр)
-        
-    Returns:
-        DataFrame с данными программ, включая статистику и риски
+    Использует материализованное представление mv_program_stats.
     """
     if _engine is None:
         _engine = get_engine()
@@ -800,11 +843,9 @@ def load_program_data(_engine=None):
     sql = text(
         """
         SELECT 
-            p.*,
-            r.avg_risk
+            p.*
         FROM mv_program_stats p
-        LEFT JOIN mv_program_risk r USING(program)
-        ORDER BY program
+        ORDER BY program_name
         """
     )
     return pd.read_sql(sql, _engine)
@@ -813,32 +854,23 @@ def load_program_data(_engine=None):
 def load_module_data(program=None, _engine=None):
     """
     Загружает агрегированные данные на уровне модулей для указанной программы.
-    Использует материализованное представление mv_module_risk.
-    
-    Args:
-        program: Название программы для фильтрации (None для всех программ)
-        _engine: SQLAlchemy engine для подключения к БД (не хешируемый параметр)
-        
-    Returns:
-        DataFrame с данными модулей, включая статистику и риски
+    Использует материализованное представление mv_module_stats.
     """
     if _engine is None:
         _engine = get_engine()
     
     query = """
         SELECT 
-            m.*,
-            r.avg_risk
+            m.*
         FROM mv_module_stats m
-        LEFT JOIN mv_module_risk r USING(program, module, module_order)
     """
     
     params = {}
     if program:
-        query += " WHERE m.program = :program"
+        query += " WHERE m.program_name = :program"
         params["program"] = program
         
-    query += " ORDER BY m.program, m.module_order"
+    query += " ORDER BY m.program_name, m.module_order"
     
     return pd.read_sql(text(query), _engine, params=params)
 
@@ -846,42 +878,32 @@ def load_module_data(program=None, _engine=None):
 def load_lesson_data(program=None, module=None, _engine=None):
     """
     Загружает агрегированные данные на уровне уроков для указанной программы и модуля.
-    Использует материализованное представление mv_lesson_risk.
-    
-    Args:
-        program: Название программы для фильтрации (None для всех программ)
-        module: Название модуля для фильтрации (None для всех модулей)
-        _engine: SQLAlchemy engine для подключения к БД (не хешируемый параметр)
-        
-    Returns:
-        DataFrame с данными уроков, включая статистику и риски
+    Использует материализованное представление mv_lesson_stats.
     """
     if _engine is None:
         _engine = get_engine()
     
     query = """
         SELECT 
-            l.*,
-            r.avg_risk
+            l.*
         FROM mv_lesson_stats l
-        LEFT JOIN mv_lesson_risk r USING(program, module, module_order, lesson, lesson_order)
     """
     
     params = {}
     where_clauses = []
     
     if program:
-        where_clauses.append("l.program = :program")
+        where_clauses.append("l.program_name = :program")
         params["program"] = program
         
     if module:
-        where_clauses.append("l.module = :module")
+        where_clauses.append("l.module_name = :module")
         params["module"] = module
     
     if where_clauses:
         query += " WHERE " + " AND ".join(where_clauses)
         
-    query += " ORDER BY l.program, l.module_order, l.lesson_order"
+    query += " ORDER BY l.program_name, l.module_order, l.lesson_order"
     
     return pd.read_sql(text(query), _engine, params=params)
 
@@ -889,47 +911,50 @@ def load_lesson_data(program=None, module=None, _engine=None):
 def load_gz_data(program=None, module=None, lesson=None, _engine=None):
     """
     Загружает агрегированные данные на уровне групп заданий (ГЗ) для указанных параметров.
-    Использует материализованное представление mv_gz_risk.
-    
-    Args:
-        program: Название программы для фильтрации (None для всех программ)
-        module: Название модуля для фильтрации (None для всех модулей)
-        lesson: Название урока для фильтрации (None для всех уроков)
-        _engine: SQLAlchemy engine для подключения к БД (не хешируемый параметр)
-        
-    Returns:
-        DataFrame с данными групп заданий, включая статистику и риски
+    Использует материализованное представление mv_gz_stats, соединенное с cards_structure для фильтрации.
     """
     if _engine is None:
         _engine = get_engine()
     
+    # Выбираем все поля из mv_gz_stats и необходимые для сортировки/фильтрации из cards_structure
+    # Используем DISTINCT для g.* чтобы избежать дублирования строк из mv_gz_stats, если одна ГЗ
+    # теоретически может быть привязана к разным путям в cards_structure, соответствующим фильтрам.
+    # Однако, для правильной работы фильтров и сортировки, нам нужны поля из cs в выборке.
+    # Чтобы избежать дубликатов ГЗ, если одна ГЗ относится к нескольким урокам (что не должно быть, но возможно),
+    # лучше группировать по полям ГЗ и агрегировать или выбирать первое значение для полей структуры.
+    # Но для начала, попробуем JOIN и фильтрацию. Если будут дубли, будем уточнять.
+
     query = """
-        SELECT 
+        SELECT DISTINCT
             g.*,
-            r.avg_risk
+            cs.program_name, 
+            cs.module_name, 
+            cs.module_order, 
+            cs.lesson_name, 
+            cs.lesson_order
         FROM mv_gz_stats g
-        LEFT JOIN mv_gz_risk r USING(program, module, module_order, lesson, lesson_order, gz, gz_id)
+        JOIN cards_structure cs ON g.gz_id = cs.gz_id
     """
     
     params = {}
     where_clauses = []
     
     if program:
-        where_clauses.append("g.program = :program")
+        where_clauses.append("cs.program_name = :program")
         params["program"] = program
         
     if module:
-        where_clauses.append("g.module = :module")
+        where_clauses.append("cs.module_name = :module")
         params["module"] = module
         
     if lesson:
-        where_clauses.append("g.lesson = :lesson")
+        where_clauses.append("cs.lesson_name = :lesson")
         params["lesson"] = lesson
     
     if where_clauses:
         query += " WHERE " + " AND ".join(where_clauses)
         
-    query += " ORDER BY g.program, g.module_order, g.lesson_order, g.gz"
+    query += " ORDER BY cs.program_name, cs.module_order, cs.lesson_order, g.gz_name"
     
     return pd.read_sql(text(query), _engine, params=params)
 
@@ -937,52 +962,48 @@ def load_gz_data(program=None, module=None, lesson=None, _engine=None):
 def load_card_data(program=None, module=None, lesson=None, gz=None, _engine=None):
     """
     Загружает данные карточек для указанных параметров фильтрации.
-    Использует материализованное представление mv_cards_mv и данные о риске.
-    
-    Args:
-        program: Название программы для фильтрации (None для всех программ)
-        module: Название модуля для фильтрации (None для всех модулей)
-        lesson: Название урока для фильтрации (None для всех уроков)
-        gz: Название группы заданий для фильтрации (None для всех групп)
-        _engine: SQLAlchemy engine для подключения к БД (не хешируемый параметр)
-        
-    Returns:
-        DataFrame с данными карточек, включая все метрики и риск
     """
     if _engine is None:
         _engine = get_engine()
     
     query = """
         SELECT 
-            c.*,
-            r.risk
-        FROM mv_cards_mv c
-        LEFT JOIN card_risk_cache r ON c.card_id = r.card_id
+            cs.*,
+            cm.total_attempts, cm.attempted_share, cm.success_rate, 
+            cm.first_try_success_rate, cm.complaint_rate, cm.complaints_total,
+            cm.discrimination_avg, cm.success_attempts_rate, cm.time_median,
+            cm.complaints_text,
+            cst.status, cst.updated_at,
+            crc.risk
+        FROM cards_structure cs
+        LEFT JOIN cards_metrics cm ON cs.card_id = cm.card_id
+        LEFT JOIN card_status cst ON cs.card_id = cst.card_id
+        LEFT JOIN card_risk_cache crc ON cs.card_id = crc.card_id
     """
     
     params = {}
     where_clauses = []
     
     if program:
-        where_clauses.append("c.program = :program")
+        where_clauses.append("cs.program_name = :program")
         params["program"] = program
         
     if module:
-        where_clauses.append("c.module = :module")
+        where_clauses.append("cs.module_name = :module")
         params["module"] = module
         
     if lesson:
-        where_clauses.append("c.lesson = :lesson")
+        where_clauses.append("cs.lesson_name = :lesson")
         params["lesson"] = lesson
         
     if gz:
-        where_clauses.append("c.gz = :gz")
+        where_clauses.append("cs.gz_name = :gz")
         params["gz"] = gz
     
     if where_clauses:
         query += " WHERE " + " AND ".join(where_clauses)
         
-    query += " ORDER BY c.program, c.module_order, c.lesson_order, c.gz"
+    query += " ORDER BY cs.program_name, cs.module_order, cs.lesson_order, cs.gz_name"
     
     return pd.read_sql(text(query), _engine, params=params)
 
@@ -990,36 +1011,28 @@ def load_card_data(program=None, module=None, lesson=None, gz=None, _engine=None
 def load_top_cards_by_risk(gz=None, limit=10, _engine=None):
     """
     Загружает карточки с наивысшим риском для указанной группы заданий или для всех групп.
-    
-    Args:
-        gz: Название группы заданий для фильтрации (None для всех групп)
-        limit: Максимальное количество карточек для каждой группы заданий
-        _engine: SQLAlchemy engine для подключения к БД (не хешируемый параметр)
-        
-    Returns:
-        DataFrame с данными топ-карточек по риску
     """
     if _engine is None:
         _engine = get_engine()
     
     query = """
         SELECT 
-            t.gz, t.card_id, t.risk, t.rn,
-            c.program, c.module, c.lesson, c.card_type, c.card_url
+            t.gz_name, t.card_id, t.risk, t.rn,
+            cs.program_name, cs.module_name, cs.lesson_name, cs.card_type, cs.card_url
         FROM top10_by_group t
-        JOIN mv_cards_mv c ON t.card_id = c.card_id
+        JOIN cards_structure cs ON t.card_id = cs.card_id
     """
     
     params = {}
     if gz:
-        query += " WHERE t.gz = :gz"
+        query += " WHERE t.gz_name = :gz"
         params["gz"] = gz
     
     if limit:
         query += " AND t.rn <= :limit"
         params["limit"] = limit
         
-    query += " ORDER BY t.gz, t.rn"
+    query += " ORDER BY t.gz_name, t.rn"
     
     return pd.read_sql(text(query), _engine, params=params)
 
@@ -1144,28 +1157,28 @@ def load_all_data_for_level(level="overview", program=None, module=None, lesson=
         result["modules"] = parallel_data.get("load_module_data", pd.DataFrame())
         result["lessons"] = parallel_data.get("load_lesson_data", pd.DataFrame())
         result["program_data"] = load_program_data(_engine=_engine)
-        result["program_data"] = result["program_data"][result["program_data"]["program"] == program]
+        result["program_data"] = result["program_data"][result["program_data"]["program_name"] == program]
     
     elif level == "module" and module:
         parallel_data = load_data_parallel(program=program, module=module, _engine=_engine, max_workers=max_workers)
         result["lessons"] = parallel_data.get("load_lesson_data", pd.DataFrame())
         result["gz_list"] = parallel_data.get("load_gz_data", pd.DataFrame())
         result["module_data"] = load_module_data(program=program, _engine=_engine)
-        result["module_data"] = result["module_data"][result["module_data"]["module"] == module]
+        result["module_data"] = result["module_data"][result["module_data"]["module_name"] == module]
     
     elif level == "lesson" and lesson:
         parallel_data = load_data_parallel(program=program, module=module, lesson=lesson, _engine=_engine, max_workers=max_workers)
         result["gz_list"] = parallel_data.get("load_gz_data", pd.DataFrame())
         result["cards"] = parallel_data.get("load_card_data", pd.DataFrame())
         result["lesson_data"] = load_lesson_data(program=program, module=module, _engine=_engine)
-        result["lesson_data"] = result["lesson_data"][result["lesson_data"]["lesson"] == lesson]
+        result["lesson_data"] = result["lesson_data"][result["lesson_data"]["lesson_name"] == lesson]
     
     elif level == "gz" and gz:
         parallel_data = load_data_parallel(program=program, module=module, lesson=lesson, gz=gz, _engine=_engine, max_workers=max_workers)
         result["cards"] = parallel_data.get("load_card_data", pd.DataFrame())
         result["top_cards"] = parallel_data.get("load_top_cards_by_risk", pd.DataFrame())
         result["gz_data"] = load_gz_data(program=program, module=module, lesson=lesson, _engine=_engine)
-        result["gz_data"] = result["gz_data"][result["gz_data"]["gz"] == gz]
+        result["gz_data"] = result["gz_data"][result["gz_data"]["gz_name"] == gz]
     
     elif level == "card" and "card_id" in result:
         card_id = result["card_id"]
@@ -1173,3 +1186,48 @@ def load_all_data_for_level(level="overview", program=None, module=None, lesson=
         result["card_data"] = result["card_data"][result["card_data"]["card_id"] == card_id]
     
     return result
+
+@st.cache_data(ttl=3600)  # Кэширование на 1 час
+def load_navigation_data(_engine=None):
+    """
+    Загружает все данные из таблицы cards_structure для навигации и фильтрации.
+    """
+    if _engine is None:
+        _engine = get_engine()
+    
+    sql = text("SELECT * FROM cards_structure")
+    return pd.read_sql(sql, _engine)
+
+@st.cache_data(ttl=300)  # Кэширование на 5 минут
+def get_active_tasks_count(_engine, user_id: int) -> int:
+    """
+    Подсчитывает количество активных задач для указанного пользователя.
+    Активными считаются задачи, статус которых не входит в список завершенных.
+    """
+    if user_id is None:
+        return 0
+
+    # Статусы, которые считаются неактивными (завершенными)
+    inactive_statuses = ('completed', 'done', 'closed', 'resolved', 'cancelled', 'rejected')
+    
+    # Формируем строку с плейсхолдерами для статусов
+    status_placeholders = ", ".join([f":status_{i}" for i in range(len(inactive_statuses))])
+    
+    # Создаем словарь параметров для SQL-запроса
+    params = {"user_id": user_id}
+    for i, status_val in enumerate(inactive_statuses):
+        params[f"status_{i}"] = status_val
+
+    sql_query = text(f"""
+        SELECT COUNT(*) 
+        FROM card_assignments
+        WHERE user_id = :user_id AND status NOT IN ({status_placeholders});
+    """)
+    
+    try:
+        with _engine.connect() as connection:
+            result = connection.execute(sql_query, params).scalar_one_or_none()
+        return result if result is not None else 0
+    except Exception as e:
+        print(f"Error counting active tasks: {e}")
+        return 0

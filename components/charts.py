@@ -220,27 +220,55 @@ def prepare_sequential_ids(df, id_column, sort_by=None, ascending=False, limit=N
     
     return result_df
     
-def display_risk_bar_chart(df, category_col, limit=20, title=None, height=None):
+def display_risk_bar_chart(df, category_col, value_column='risk', limit=20, title=None, height=None):
     """
     Отображает столбчатую диаграмму риска по категориям
     
     Args:
         df: DataFrame с данными
         category_col: Колонка с категориями для группировки
+        value_column: Колонка со значениями для оси Y (по умолчанию 'risk')
         limit: Максимальное количество элементов для отображения
         title: Заголовок графика (если None, будет сгенерирован)
         height: Высота графика (если None, используется автоматическое значение)
     """
+    if df is None or df.empty:
+        st.warning("Нет данных для отображения графика.")
+        return pd.DataFrame()
+
+    # Проверяем наличие необходимых колонок
+    required_cols = [category_col, value_column, "success_rate", "complaint_rate"]
+    if not all(col in df.columns for col in required_cols):
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        # Если отсутствует cards_count, но есть card_id, это нормально для некоторых вызовов, но items не будет.
+        if not ("cards_count" in df.columns or "card_id" in df.columns) and "items" not in missing_cols:
+             missing_cols.append("cards_count/card_id for items")
+        st.error(f"Для графика display_risk_bar_chart отсутствуют колонки: {missing_cols}. Доступные: {df.columns.tolist()}")
+        return pd.DataFrame()
+
+    agg_spec = {
+        value_column: (value_column, "mean"),
+        "success": ("success_rate", "mean"),
+        "complaints": ("complaint_rate", "mean")
+    }
+    if "cards_count" in df.columns:
+        agg_spec["items"] = ("cards_count", "sum")
+    elif "card_id" in df.columns:
+        agg_spec["items"] = ("card_id", "nunique")
+    else:
+        # Если нет ни cards_count, ни card_id, создаем items как количество строк в группе
+        # Это может быть не совсем то, что ожидается, но лучше, чем ошибка
+        df["_group_count_helper"] = 1 # Временный столбец
+        agg_spec["items"] = ("_group_count_helper", "count")
+
     # Группируем данные по указанной колонке и вычисляем средний риск
-    agg_df = df.groupby(category_col).agg(
-        risk=("risk", "mean"),
-        success=("success_rate", "mean"),
-        complaints=("complaint_rate", "mean"),
-        items=("card_id", "nunique")
-    ).reset_index()
+    agg_df = df.groupby(category_col).agg(**agg_spec).reset_index()
     
-    # Сортируем по риску (от высокого к низкому)
-    sorted_df = agg_df.sort_values("risk", ascending=False).head(limit)
+    if "_group_count_helper" in df.columns: # Удаляем временный столбец
+        df.drop(columns=["_group_count_helper"], inplace=True)
+
+    # Сортируем по значению (от высокого к низкому)
+    sorted_df = agg_df.sort_values(value_column, ascending=False).head(limit)
     
     # Создаем заголовок, если не указан
     if title is None:
@@ -278,10 +306,10 @@ def display_risk_bar_chart(df, category_col, limit=20, title=None, height=None):
     fig = px.bar(
         sorted_df,
         x=category_col,
-        y="risk",
-        color="risk",
+        y=value_column,
+        color=value_column,
         color_continuous_scale="RdYlGn_r",
-        labels={category_col: category_col.capitalize(), "risk": "Риск"},
+        labels={category_col: category_col.capitalize(), value_column: value_column.capitalize()},
         title=title,
         height=height
     )
@@ -394,15 +422,36 @@ def display_success_complaints_chart(df, category_col, limit=15, title=None):
         limit: Максимальное количество элементов для отображения
         title: Заголовок графика (если None, будет сгенерирован)
     """
+    if df is None or df.empty:
+        st.warning("Нет данных для отображения графика.")
+        return pd.DataFrame()
+
+    required_cols_agg = ["success_rate", "complaint_rate", "risk", "discrimination_avg"]
+    if not all(col in df.columns for col in required_cols_agg):
+        missing_cols = [col for col in required_cols_agg if col not in df.columns]
+        st.error(f"Для графика display_success_complaints_chart отсутствуют колонки для агрегации: {missing_cols}. Доступные: {df.columns.tolist()}")
+        return pd.DataFrame()
+
+    agg_spec_sc = {
+        "success": ("success_rate", "mean"),
+        "complaints": ("complaint_rate", "mean"),
+        "risk": ("risk", "mean"),
+        "discrimination": ("discrimination_avg", "mean")
+    }
+    if "cards_count" in df.columns:
+        agg_spec_sc["items"] = ("cards_count", "sum")
+    elif "card_id" in df.columns:
+        agg_spec_sc["items"] = ("card_id", "nunique")
+    else:
+        df["_group_count_helper_sc"] = 1 # Временный столбец
+        agg_spec_sc["items"] = ("_group_count_helper_sc", "count")
+
     # Группируем данные по указанной колонке
-    agg_df = df.groupby(category_col).agg(
-        success=("success_rate", "mean"),
-        complaints=("complaint_rate", "mean"),
-        risk=("risk", "mean"),
-        discrimination=("discrimination_avg", "mean"),
-        items=("card_id", "nunique")
-    ).reset_index()
-    
+    agg_df = df.groupby(category_col).agg(**agg_spec_sc).reset_index()
+
+    if "_group_count_helper_sc" in df.columns: # Удаляем временный столбец
+        df.drop(columns=["_group_count_helper_sc"], inplace=True)
+
     # Сортируем по риску для выбора самых интересных точек
     sorted_df = agg_df.sort_values("risk", ascending=False).head(limit)
     
@@ -481,15 +530,35 @@ def display_completion_radar(df, category_col, limit=5, title=None):
     ]
     
     # Группируем данные по указанной колонке
-    agg_df = df.groupby(category_col).agg(
-        success_rate=("success_rate", "mean"),
-        first_try_success_rate=("first_try_success_rate", "mean") if "first_try_success_rate" in df.columns else ("success_rate", "mean"),
-        complaint_rate=("complaint_rate", "mean"),
-        discrimination_avg=("discrimination_avg", "mean"),
-        risk=("risk", "mean"),
-        items=("card_id", "nunique")
-    ).reset_index()
+    agg_spec_radar = {
+        "success_rate": ("success_rate", "mean"),
+        "first_try_success_rate": ("first_try_success_rate", "mean") if "first_try_success_rate" in df.columns else ("success_rate", "mean"),
+        "complaint_rate": ("complaint_rate", "mean"),
+        "discrimination_avg": ("discrimination_avg", "mean"),
+        "risk": ("risk", "mean")
+    }
+    temp_col_name = None # Инициализируем temp_col_name
+    if "cards_count" in df.columns:
+        agg_spec_radar["items"] = ("cards_count", "sum")
+    elif "card_id" in df.columns:
+        agg_spec_radar["items"] = ("card_id", "nunique")
+    else:
+        # Если нет ни cards_count, ни card_id, создаем items как количество строк в группе
+        temp_col_name = "_radar_group_count_helper"
+        while temp_col_name in df.columns:
+            temp_col_name += "_"
+        df[temp_col_name] = 1 
+        agg_spec_radar["items"] = (temp_col_name, "count")
+
+    agg_df = df.groupby(category_col).agg(**agg_spec_radar).reset_index()
     
+    # Удаляем временный столбец, если он был создан
+    if temp_col_name is not None and temp_col_name in df.columns: # Проверяем, что temp_col_name был установлен и существует в df
+        # Убедимся, что мы удаляем столбец, который действительно использовали для агрегации, на всякий случай
+        if agg_spec_radar.get("items") and agg_spec_radar["items"][0] == temp_col_name:
+            # errors='ignore' полезен, если df мог быть изменен между созданием и удалением
+            df.drop(columns=[temp_col_name], inplace=True, errors='ignore') 
+
     # Сортируем по риску и выбираем верхние N элементов
     top_items = agg_df.sort_values("risk", ascending=False).head(limit)
     

@@ -150,16 +150,40 @@ def display_clickable_items(df, column, level, metrics=None):
     
     # Получаем уникальные значения и метрики для них
     if metrics:
-        agg_df = df.groupby(column).agg(
-            success=("success_rate", "mean"),
-            complaints=("complaint_rate", "mean"),
-            risk=("risk", "mean"),
-            cards=("card_id", "nunique")
-        ).reset_index()
-    else:
-        agg_df = df.groupby(column).agg(
-            cards=("card_id", "nunique")
-        ).reset_index()
+        agg_spec = {
+            "success_rate": "mean",
+            "complaint_rate": "mean",
+            "risk": "mean",
+        }
+        if "cards_count" in df.columns and ("cards" in metrics or "cards_count" in metrics):
+            agg_spec["cards"] = ("cards_count", "sum")
+        elif "card_id" in df.columns and "cards" in metrics:
+            agg_spec["cards"] = ("card_id", "nunique")
+        
+        # Фильтруем agg_spec, оставляя только те метрики, которые есть в df и запрошены
+        final_agg_spec = {k: v for k, v in agg_spec.items() if v[0] in df.columns and (k in metrics or v[0] in metrics)}
+        # Если cards специально не запросили, но есть cards_count/card_id, добавляем его для подсчета
+        if "cards" not in final_agg_spec and "cards_count" in df.columns:
+             final_agg_spec["cards"] = ("cards_count", "sum")
+        elif "cards" not in final_agg_spec and "card_id" in df.columns:
+             final_agg_spec["cards"] = ("card_id", "nunique")
+
+        if not final_agg_spec: # Если нечего агрегировать из запрошенного
+            # Просто берем уникальные значения из column
+            agg_df = pd.DataFrame({column: df[column].unique()})
+            # Добавляем пустые колонки для метрик, чтобы не было ошибок ниже
+            for m_name in ["cards", "risk", "success_rate", "complaint_rate"]:
+                if m_name in metrics: agg_df[m_name] = 0 if m_name == "cards" else np.nan 
+        else:
+            agg_df = df.groupby(column).agg(**final_agg_spec).reset_index()
+    else: # Если метрики не запрошены, все равно посчитаем количество элементов
+        if "cards_count" in df.columns:
+            agg_df = df.groupby(column).agg(cards=("cards_count", "sum")).reset_index()
+        elif "card_id" in df.columns:
+            agg_df = df.groupby(column).agg(cards=("card_id", "nunique")).reset_index()
+        else:
+            agg_df = pd.DataFrame({column: df[column].unique()})
+            agg_df["cards"] = 1 # По умолчанию 1 элемент, если нечего считать
     
     # Сортируем по колонке
     sorted_df = agg_df.sort_values(column)
@@ -197,14 +221,18 @@ def display_clickable_items(df, column, level, metrics=None):
             # Показ метрик рядом с кнопкой
             if metrics:
                 metrics_str = []
-                if "cards" in metrics:
-                    metrics_str.append(f"Cards: {row.cards}")
-                if "risk" in metrics:
+                if ("cards" in metrics or "cards_count" in metrics) and hasattr(row, 'cards'):
+                    metrics_str.append(f"Cards: {int(row.cards) if pd.notna(row.cards) else 0}")
+                if "risk" in metrics and hasattr(row, 'risk'):
                     metrics_str.append(f"Risk: {row.risk:.2f}")
-                if "success" in metrics:
-                    metrics_str.append(f"Success: {row.success:.1%}")
-                if "complaints" in metrics:
-                    metrics_str.append(f"Compl: {row.complaints:.1%}")
+                if ("success" in metrics or "success_rate" in metrics) and hasattr(row, 'success_rate'): # Проверяем оба варианта имени
+                    metrics_str.append(f"Success: {row.success_rate:.1%}")
+                elif ("success" in metrics or "success_rate" in metrics) and hasattr(row, 'success'): # Старый вариант для обратной совместимости
+                     metrics_str.append(f"Success: {row.success:.1%}")
+                if ("complaints" in metrics or "complaint_rate" in metrics) and hasattr(row, 'complaint_rate'):
+                    metrics_str.append(f"Compl: {row.complaint_rate:.1%}")
+                elif ("complaints" in metrics or "complaint_rate" in metrics) and hasattr(row, 'complaints'):
+                     metrics_str.append(f"Compl: {row.complaints:.1%}")
                 st.markdown(" | ".join(metrics_str))
 
 def display_programs_by_class(df, column="program", metrics=None):
@@ -221,23 +249,46 @@ def display_programs_by_class(df, column="program", metrics=None):
     # Группируем программы по классам
     programs_by_class = group_programs_by_class(df, column)
     
-    # Получаем метрики для каждой программы
-    if metrics:
-        agg_df = df.groupby(column).agg(
-            success=("success_rate", "mean"),
-            complaints=("complaint_rate", "mean"),
-            risk=("risk", "mean"),
-            cards=("card_id", "nunique")
-        ).reset_index()
-    else:
-        agg_df = df.groupby(column).agg(
-            cards=("card_id", "nunique")
-        ).reset_index()
-    
-    # Преобразуем в словарь для быстрого доступа
     metrics_dict = {}
-    for _, row in agg_df.iterrows():
-        metrics_dict[row[column]] = row
+    if metrics:
+        # Создаем словарь для агрегации
+        agg_dict = {}
+        possible_metrics_map = {
+            "cards_count": "sum", # Если передаем cards_count, то суммируем
+            "risk": "mean",
+            "success_rate": "mean",
+            "complaint_rate": "mean",
+            "first_try_success_rate": "mean",
+            "discrimination_avg": "mean"
+        }
+
+        # Проверяем, какие из запрошенных метрик доступны в df и добавляем в agg_dict
+        for metric_name in metrics:
+            if metric_name in df.columns:
+                # Для cards_count используем имя "cards" в результате агрегации, если оно запрошено как "cards_count"
+                # или если метрика "cards" была запрошена и cards_count доступен.
+                if metric_name == "cards_count":
+                    agg_dict["cards"] = (metric_name, possible_metrics_map.get(metric_name, "sum")) # sum or first
+                elif metric_name in possible_metrics_map:
+                    agg_dict[metric_name] = (metric_name, possible_metrics_map[metric_name])
+            elif metric_name == "cards" and "cards_count" in df.columns: # если запросили 'cards', а есть 'cards_count'
+                 agg_dict["cards"] = ("cards_count", possible_metrics_map.get("cards_count", "sum"))
+            elif metric_name == "cards" and "card_id" in df.columns: # резервный вариант для cards
+                 agg_dict["cards"] = ("card_id", "nunique")
+
+        if agg_dict: # Только если есть что агрегировать
+            agg_df = df.groupby(column).agg(**agg_dict).reset_index()
+            # Преобразуем в словарь для быстрого доступа
+            for _, row in agg_df.iterrows():
+                metrics_dict[row[column]] = row
+        else: # Если нечего агрегировать из запрошенных метрик
+            # Создаем metrics_dict с пустыми значениями или значениями по умолчанию
+            for program_name in df[column].unique():
+                # Создаем объект Series с NaN или 0 для каждой запрошенной метрики
+                # Это предотвратит ошибки AttributeError при попытке доступа к row.metric_name
+                metric_values = {m: np.nan for m in metrics}
+                if "cards" in metrics: metric_values["cards"] = 0 # default for cards
+                metrics_dict[program_name] = pd.Series(metric_values)
     
     # Собираем текущие фильтры
     current_filters = {}
@@ -278,14 +329,21 @@ def display_programs_by_class(df, column="program", metrics=None):
                 if metrics and program in metrics_dict:
                     row = metrics_dict[program]
                     metrics_str = []
-                    if "cards" in metrics:
-                        metrics_str.append(f"Cards: {row.cards}")
-                    if "risk" in metrics:
+                    # Обрабатываем отображение метрик на основе того, что есть в row
+                    if "cards_count" in metrics and hasattr(row, 'cards'): # "cards" - это результат агрегации cards_count
+                        metrics_str.append(f"Cards: {int(row.cards) if pd.notna(row.cards) else 0}")
+                    elif "cards" in metrics and hasattr(row, 'cards'): # если cards_count не передали, но cards есть
+                        metrics_str.append(f"Cards: {int(row.cards) if pd.notna(row.cards) else 0}")
+                    
+                    if "risk" in metrics and hasattr(row, 'risk'):
                         metrics_str.append(f"Risk: {row.risk:.2f}")
-                    if "success" in metrics:
-                        metrics_str.append(f"Success: {row.success:.1%}")
-                    if "complaints" in metrics:
-                        metrics_str.append(f"Compl: {row.complaints:.1%}")
+                    if "success_rate" in metrics and hasattr(row, 'success_rate'):
+                        metrics_str.append(f"Success: {row.success_rate:.1%}")
+                    if "complaint_rate" in metrics and hasattr(row, 'complaint_rate'): # Добавлено для полноты, если будет использоваться
+                        metrics_str.append(f"Compl: {row.complaint_rate:.1%}")
+                    if "first_try_success_rate" in metrics and hasattr(row, 'first_try_success_rate'):
+                        metrics_str.append(f"1st Try: {row.first_try_success_rate:.1%}")
+                        
                     st.markdown(" | ".join(metrics_str))
         
         # Добавляем разделитель между классами
