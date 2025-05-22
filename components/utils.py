@@ -185,8 +185,29 @@ def display_clickable_items(df, column, level, metrics=None):
             agg_df = pd.DataFrame({column: df[column].unique()})
             agg_df["cards"] = 1 # По умолчанию 1 элемент, если нечего считать
     
-    # Сортируем по колонке
-    sorted_df = agg_df.sort_values(column)
+    # Проверяем, есть ли в исходном DataFrame информация о порядке
+    # Для модулей это module_order, для уроков - lesson_order, для ГЗ - gz_order
+    order_column_map = {
+        "module_name": "module_order",
+        "lesson_name": "lesson_order", 
+        "gz_name": "gz_order",
+        "gz": "gz_order"
+    }
+    
+    order_column = order_column_map.get(column)
+    
+    if order_column and order_column in df.columns:
+        # Получаем порядок из исходного DataFrame
+        order_df = df.groupby(column)[order_column].first().reset_index()
+        # Объединяем с агрегированными данными
+        sorted_df = agg_df.merge(order_df, on=column, how='left')
+        # Сортируем по порядку
+        sorted_df = sorted_df.sort_values(order_column)
+        # Удаляем колонку с порядком, так как она больше не нужна
+        sorted_df = sorted_df.drop(columns=[order_column])
+    else:
+        # Если порядок не задан, сортируем по алфавиту
+        sorted_df = agg_df.sort_values(column)
     
     # Разбиваем на две колонки
     col1, col2 = st.columns(2)

@@ -301,11 +301,19 @@ def page_programs(df: pd.DataFrame):
     
     # 6. Список модулей с кликабельными ссылками
     st.subheader("📚 Список модулей")
+    
+    # Сортируем df_prog по module_order перед отображением
+    if "module_order" in df_prog.columns:
+        df_prog_sorted = df_prog.sort_values("module_order").copy()
+    else:
+        # Если нет колонки с порядком, оставляем как есть (функция внутри отсортирует по алфавиту)
+        df_prog_sorted = df_prog.copy()
+    
     # display_clickable_items(df_prog, "module_name", "module", metrics=["cards", "risk", "success"])
     # display_clickable_items теперь ожидает cards_count или card_id внутри себя.
-    # Передаем df_prog, который уже содержит cards_count и переименованные метрики.
+    # Передаем df_prog_sorted, который уже содержит cards_count и переименованные метрики.
     # Метрики, которые мы хотим видеть: 'cards_count', 'risk', 'success_rate'
-    display_clickable_items(df_prog, "module_name", "module", metrics=["cards_count", "risk", "success_rate"]) 
+    display_clickable_items(df_prog_sorted, "module_name", "module", metrics=["cards_count", "risk", "success_rate"]) 
     
     # 7. Если модуль выбран, показываем встроенную страницу уроков
     if st.session_state.get("filter_module"):
