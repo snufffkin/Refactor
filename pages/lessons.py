@@ -116,6 +116,37 @@ def page_lessons(df: pd.DataFrame):
         columns_for_agg_display = [col for col in columns_for_agg_display if col in df_lesson.columns]
 
         agg_gz_display = df_lesson[columns_for_agg_display].copy()
+        
+        # Функция для сокращения названий ГЗ
+        def shorten_gz_name(name):
+            """Сокращает длинные названия ГЗ"""
+            if pd.isna(name):
+                return name
+            name = str(name).strip()
+            # Словарь замен
+            replacements = {
+                "Презентация": "Пр.",
+                "презентация": "Пр.",
+                "Рабочая тетрадь": "РТ",
+                "рабочая тетрадь": "РТ",
+                "Дополнительное задание": "Доп.",
+                "дополнительное задание": "Доп.",
+                "Дополнительные материалы": "Доп.",
+                "дополнительные материалы": "Доп.",
+                "Дополнительные задания": "Доп.",
+                "дополнительные задания": "Доп."
+            }
+            # Применяем замены
+            for full, short in replacements.items():
+                if full in name:
+                    name = name.replace(full, short)
+            return name
+        
+        # Сохраняем полные названия для hover_data
+        agg_gz_display['gz_name_full'] = agg_gz_display['gz_name'].copy()
+        # Применяем сокращения для отображения
+        agg_gz_display['gz_name'] = agg_gz_display['gz_name'].apply(shorten_gz_name)
+        
         agg_gz_display.rename(columns={
             'success_rate': 'success',
             'complaint_rate': 'complaints',
@@ -127,17 +158,17 @@ def page_lessons(df: pd.DataFrame):
         agg_gz_display = agg_gz_display.sort_values("risk", ascending=False).reset_index(drop=True)
         agg_gz_display["gz_num"] = agg_gz_display.index + 1
         
-        hover_data_cols = ["gz_name", "success", "complaints", "discrimination", "cards"]
+        hover_data_cols = ["gz_name_full", "success", "complaints", "discrimination", "cards"]
         if "gz_id" in agg_gz_display.columns and "gz_id" not in hover_data_cols:
-            hover_data_cols.insert(1, "gz_id") # Вставим gz_id после gz_name для подсказки
+            hover_data_cols.insert(1, "gz_id") # Вставим gz_id после gz_name_full для подсказки
 
         fig = px.bar(
             agg_gz_display,
-            x="gz_num",
+            x="gz_name",
             y="risk",
             color="risk",
             color_continuous_scale="RdYlGn_r",
-            labels={"gz_num": "Номер ГЗ", "risk": "Риск"},
+            labels={"gz_name": "Группа заданий", "risk": "Риск"},
             title="Уровень риска по группам заданий",
             hover_data=hover_data_cols 
         )
@@ -154,7 +185,7 @@ def page_lessons(df: pd.DataFrame):
             current_customdata_idx = 1
 
         hovertemplate += (
-            "Номер: %{x}<br>" +
+            "Название: %{x}<br>" +
             "Риск: %{y:.2f}<br>" +
             f"Успешность: %{{customdata[{current_customdata_idx}]:.1%}}<br>" +
             f"Жалобы: %{{customdata[{current_customdata_idx+1}]:.1%}}<br>" +
@@ -162,7 +193,7 @@ def page_lessons(df: pd.DataFrame):
             f"Карточек: %{{customdata[{current_customdata_idx+3}]}}"
         )
         fig.update_traces(hovertemplate=hovertemplate)
-        fig.update_layout(xaxis_title="Номер ГЗ", yaxis_title="Риск", xaxis_tickangle=0)
+        fig.update_layout(xaxis_title="Группа заданий", yaxis_title="Риск", xaxis_tickangle=0)
         st.plotly_chart(fig, use_container_width=True)
 
         st.subheader("📊 Детальное сравнение групп заданий")
@@ -182,24 +213,44 @@ def page_lessons(df: pd.DataFrame):
             tab_agg_metrics = tab_agg_metrics.sort_values("risk", ascending=False).reset_index(drop=True)
             tab_agg_metrics["gz_num"] = tab_agg_metrics.index + 1
             tab_agg_metrics = tab_agg_metrics.head(15)
+            # Применяем сокращения названий
+            tab_agg_metrics['gz_name_full'] = tab_agg_metrics['gz_name'].copy()
+            tab_agg_metrics['gz_name'] = tab_agg_metrics['gz_name'].apply(shorten_gz_name)
             melted_df_tab = pd.melt(
                 tab_agg_metrics, 
-                id_vars=["gz_name", "gz_num"],
+                id_vars=["gz_name", "gz_num", "gz_name_full"],
                 value_vars=["success_rate", "complaint_rate", "discrimination_avg", "risk"],
                 var_name="metric", value_name="value"
             )
             metric_names_tab = {"success_rate": "Успешность", "complaint_rate": "Жалобы", "discrimination_avg": "Дискриминативность", "risk": "Риск"}
             melted_df_tab["metric_name"] = melted_df_tab["metric"].map(metric_names_tab)
-            fig_metrics_tab = px.bar(melted_df_tab, x="gz_num", y="value", color="metric_name", barmode="group", hover_data=["gz_name"],
-                                 labels={"gz_num": "Номер ГЗ", "value": "Значение", "metric_name": "Метрика"}, title="Сравнение метрик по ГЗ")
+            fig_metrics_tab = px.bar(melted_df_tab, x="gz_name", y="value", color="metric_name", barmode="group",
+                                 labels={"gz_name": "Группа заданий", "value": "Значение", "metric_name": "Метрика"}, 
+                                 title="Сравнение метрик по ГЗ",
+                                 hover_data=["gz_name_full"])
+            # Обновляем hover template
+            fig_metrics_tab.update_traces(
+                hovertemplate="<b>%{customdata[0]}</b><br>" +
+                             "Метрика: %{data.name}<br>" +
+                             "Значение: %{y:.1%}<br>" +
+                             "<extra></extra>"
+            )
             fig_metrics_tab.update_layout(yaxis_tickformat=".1%", xaxis_tickangle=0)
             st.plotly_chart(fig_metrics_tab, use_container_width=True)
 
         with tabs[1]:
-            display_success_complaints_chart(df_lesson, "gz_name", limit=20)
+            # Подготавливаем данные с сокращенными названиями для графика
+            df_lesson_short = df_lesson.copy()
+            df_lesson_short['gz_name_full'] = df_lesson_short['gz_name']
+            df_lesson_short['gz_name'] = df_lesson_short['gz_name'].apply(shorten_gz_name)
+            display_success_complaints_chart(df_lesson_short, "gz_name", limit=20)
         
         with tabs[2]:
-            display_completion_radar(df_lesson, "gz_name", limit=5)
+            # Подготавливаем данные с сокращенными названиями для радара
+            df_lesson_radar = df_lesson.copy()
+            df_lesson_radar['gz_name_full'] = df_lesson_radar['gz_name']
+            df_lesson_radar['gz_name'] = df_lesson_radar['gz_name'].apply(shorten_gz_name)
+            display_completion_radar(df_lesson_radar, "gz_name", limit=5)
         
         st.subheader("📋 Детальная информация по группам заданий")
         # detailed_df_gz = agg_gz_display[["gz_num", "gz_name", "risk", "success", "complaints", "discrimination", "cards"]]
@@ -230,7 +281,8 @@ def page_lessons(df: pd.DataFrame):
                 # Мерджим с agg_gz_display, который уже содержит gz_name и gz_num
                 agg_gz_display = pd.merge(agg_gz_display, gz_total_complaints, on='gz_name', how='left')
 
-        detailed_df_gz = agg_gz_display.rename(columns={'gz_num': 'Номер', 'gz_name': 'Группа заданий', 'risk': 'Риск', 'success': 'Успешность', 'complaints': 'Жалобы (%)', 'discrimination': 'Дискриминативность', 'cards': 'Карточек'})
+        # Используем полные названия для таблицы
+        detailed_df_gz = agg_gz_display.rename(columns={'gz_num': 'Номер', 'gz_name_full': 'Группа заданий', 'risk': 'Риск', 'success': 'Успешность', 'complaints': 'Жалобы (%)', 'discrimination': 'Дискриминативность', 'cards': 'Карточек'})
         
         # Колонки для отображения
         # Порядок важен и будет сохранен
