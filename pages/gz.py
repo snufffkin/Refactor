@@ -565,18 +565,33 @@ def page_gz(df_cards_input: pd.DataFrame, create_link_fn=None):
     # 5. Таблица с карточками и ссылками на карточки
     st.subheader("📋 Детальная информация по карточкам")
     
-    # Отображаем таблицу, сортируя по card_order
-    cards_df = df_cards[["card_id", "card_type", "status", "success_rate", 
-                      "first_try_success_rate", "complaint_rate", 
-                      "discrimination_avg", "total_attempts", "risk", "trickiness_level", "card_order"]]
+    # Колонки для извлечения из df_cards
+    cols_to_extract = ["card_id", "card_type", "status", "success_rate", 
+                       "first_try_success_rate", "complaint_rate", 
+                       "discrimination_avg", "total_attempts", "risk", 
+                       "trickiness_level", "card_order"]
+    if "complaints_total" in df_cards.columns:
+        cols_to_extract.append("complaints_total")
+        
+    cards_df = df_cards[cols_to_extract]
     
     # Сортируем по порядку карточек
     cards_df = cards_df.sort_values("card_order").reset_index(drop=True)
     
     # Переорганизуем колонки, чтобы номер был в начале
-    cards_df = cards_df[["card_order", "card_id", "card_type", "status", "success_rate", 
-                         "first_try_success_rate", "complaint_rate", 
-                         "discrimination_avg", "total_attempts", "risk", "trickiness_level"]]
+    # Сначала обязательные колонки
+    ordered_cols = ["card_order", "card_id", "card_type", "status", "success_rate", 
+                    "first_try_success_rate", "complaint_rate"]
+    # Добавляем complaints_total если есть
+    if "complaints_total" in cards_df.columns:
+        ordered_cols.append("complaints_total")
+    # Добавляем остальные
+    ordered_cols.extend(["discrimination_avg", "total_attempts", "risk", "trickiness_level"])
+    
+    # Фильтруем ordered_cols, чтобы оставить только те, что реально есть в cards_df
+    # Это важно, так как 'complaints_total' может отсутствовать в df_cards и, соответственно, в cards_df
+    final_cols = [col for col in ordered_cols if col in cards_df.columns]
+    cards_df = cards_df[final_cols]
     
     # Создаем таблицу с данными для отображения
     display_df = pd.DataFrame()
@@ -584,13 +599,20 @@ def page_gz(df_cards_input: pd.DataFrame, create_link_fn=None):
     display_df["ID карточки"] = cards_df["card_id"]
     display_df["Тип"] = cards_df["card_type"]
     display_df["Статус"] = cards_df["status"]
-    display_df["Успешность"] = cards_df["success_rate"].apply(lambda x: f"{x:.1%}")
-    display_df["Успех с 1-й"] = cards_df["first_try_success_rate"].apply(lambda x: f"{x:.1%}")
-    display_df["Жалобы"] = cards_df["complaint_rate"].apply(lambda x: f"{x:.1%}")
-    display_df["Дискр."] = cards_df["discrimination_avg"].apply(lambda x: f"{x:.2f}")
+    display_df["Успешность"] = cards_df["success_rate"].apply(lambda x: f"{x:.1%}" if pd.notnull(x) else "N/A")
+    display_df["Успех с 1-й"] = cards_df["first_try_success_rate"].apply(lambda x: f"{x:.1%}" if pd.notnull(x) else "N/A")
+    display_df["Жалобы (%)"] = cards_df["complaint_rate"].apply(lambda x: f"{x:.1%}" if pd.notnull(x) else "N/A")
+    
+    if "complaints_total" in cards_df.columns:
+        display_df["Общее кол-во жалоб"] = cards_df["complaints_total"].fillna(0).astype(int).astype(str)
+    else:
+        # Если колонки complaints_total нет, можно либо не добавлять столбец, либо добавить с N/A
+        display_df["Общее кол-во жалоб"] = "N/A" 
+        
+    display_df["Дискр."] = cards_df["discrimination_avg"].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "N/A")
     # Заменяем NaN на 0 и форматируем как целое число в строку
     display_df["Попытки"] = cards_df["total_attempts"].fillna(0).astype(int).astype(str)
-    display_df["Риск"] = cards_df["risk"].apply(lambda x: f"{x:.2f}")
+    display_df["Риск"] = cards_df["risk"].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "N/A")
     
     # Добавляем категорию подлости
     trickiness_categories = {

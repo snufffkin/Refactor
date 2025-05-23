@@ -204,14 +204,66 @@ def page_lessons(df: pd.DataFrame):
         st.subheader("📋 Детальная информация по группам заданий")
         # detailed_df_gz = agg_gz_display[["gz_num", "gz_name", "risk", "success", "complaints", "discrimination", "cards"]]
         # Переименовываем обратно для отображения, если нужно, или используем изначальные имена из agg_gz_display
-        detailed_df_gz = agg_gz_display.rename(columns={'success': 'Успешность', 'complaints': 'Жалобы', 'discrimination': 'Дискриминативность', 'cards': 'Карточек'})
-        detailed_df_gz_display = detailed_df_gz[["gz_num", "gz_name", "risk", "Успешность", "Жалобы", "Дискриминативность", "Карточек"]]
-        detailed_df_gz_display.columns = ["Номер", "Группа заданий", "Риск", "Успешность", "Жалобы", "Дискриминативность", "Карточек"]
+        
+        # Добавляем total_complaints в agg_gz_display, если он есть в df_lesson
+        # Предполагаем, что df_lesson может содержать total_complaints из mv_gz_stats
+        if 'total_complaints' in df_lesson.columns:
+            # Нужен merge, так как agg_gz_display это результат группировки df_lesson по gz_name
+            # и total_complaints может быть разным для ГЗ с одинаковым gz_name, если gz_id различается (хотя это маловероятно)
+            # Более безопасный способ - если total_complaints это свойство ГЗ, то он должен быть в df_lesson на уровне каждой ГЗ.
+            # Если total_complaints уже агрегирован (например, сумма по всем карточкам ГЗ), то можно просто взять .first()
+            # Для простоты, если total_complaints есть в df_lesson (после переименования из mv_gz_stats), 
+            # то он должен быть и в agg_gz_display после группировки (если он числовой, то sum/mean/first)
+            # Уточним: mv_gz_stats уже содержит агрегированные данные по ГЗ.
+            # Значит, total_complaints в df_lesson (если пришел оттуда) уже является агрегированным.
+            # Мы делали rename: df = df.rename(columns=column_mapping)
+            # Если total_complaints не был переименован, он останется total_complaints.
+            # agg_gz_display = df_lesson[columns_for_agg_display].copy()
+            # columns_for_agg_display должен включать total_complaints
+            # Давайте модифицируем columns_for_agg_display ранее
+            
+            # Однако, agg_gz_display уже создан ранее. 
+            # Мы можем добавить total_complaints в detailed_df_gz из исходного df_lesson, смерджив по gz_name
+            if 'gz_name' in df_lesson.columns and 'total_complaints' in df_lesson.columns:
+                # Берем первое значение total_complaints для каждой группы, т.к. mv_gz_stats уже агрегирован
+                gz_total_complaints = df_lesson.groupby('gz_name')['total_complaints'].first().reset_index()
+                # Мерджим с agg_gz_display, который уже содержит gz_name и gz_num
+                agg_gz_display = pd.merge(agg_gz_display, gz_total_complaints, on='gz_name', how='left')
+
+        detailed_df_gz = agg_gz_display.rename(columns={'gz_num': 'Номер', 'gz_name': 'Группа заданий', 'risk': 'Риск', 'success': 'Успешность', 'complaints': 'Жалобы (%)', 'discrimination': 'Дискриминативность', 'cards': 'Карточек'})
+        
+        # Колонки для отображения
+        # Порядок важен и будет сохранен
+        cols_for_display = ["Номер", "Группа заданий", "Риск", "Успешность", "Жалобы (%)"]
+        if 'total_complaints' in detailed_df_gz.columns:
+            detailed_df_gz["Общее кол-во жалоб"] = detailed_df_gz['total_complaints'].fillna(0).astype(int)
+            cols_for_display.append("Общее кол-во жалоб")
+        else:
+             # Если total_complaints не удалось добавить, создаем столбец с N/A
+            detailed_df_gz["Общее кол-во жалоб"] = "N/A"
+            cols_for_display.append("Общее кол-во жалоб")
+            
+        cols_for_display.extend(["Дискриминативность", "Карточек"])
+        
+        # Убедимся, что все колонки из cols_for_display существуют в detailed_df_gz
+        # и сохраняем порядок
+        final_display_cols = [col for col in cols_for_display if col in detailed_df_gz.columns]
+        detailed_df_gz_display = detailed_df_gz[final_display_cols]
+        
+        # detailed_df_gz_display.columns = ["Номер", "Группа заданий", "Риск", "Успешность", "Жалобы (%)", "Дискриминативность", "Карточек"]
+        # Переименование уже сделано через rename и cols_for_display
+
+        style_format = {
+            "Риск": "{:.2f}", 
+            "Успешность": "{:.1%}", 
+            "Жалобы (%)": "{:.1%}", 
+            "Дискриминативность": "{:.2f}"
+        }
+        if "Общее кол-во жалоб" in detailed_df_gz_display.columns and detailed_df_gz_display["Общее кол-во жалоб"].dtype != 'object':
+            style_format["Общее кол-во жалоб"] = "{:d}" # Формат для целых чисел
 
         st.dataframe(
-            detailed_df_gz_display.style.format({
-                "Риск": "{:.2f}", "Успешность": "{:.1%}", "Жалобы": "{:.1%}", "Дискриминативность": "{:.2f}"
-            }).background_gradient(subset=["Риск"], cmap="RdYlGn_r"),
+            detailed_df_gz_display.style.format(style_format).background_gradient(subset=["Риск"], cmap="RdYlGn_r"),
             use_container_width=True,
             hide_index=True
         )
