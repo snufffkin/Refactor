@@ -245,7 +245,8 @@ def page_modules(df: pd.DataFrame):
             subset=["Риск"],
             cmap="RdYlGn_r"
         ),
-        use_container_width=True
+        use_container_width=True,
+        hide_index=True
     )
     
     # 6. Список уроков с кликабельными ссылками

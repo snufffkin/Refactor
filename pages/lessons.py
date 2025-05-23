@@ -212,7 +212,8 @@ def page_lessons(df: pd.DataFrame):
             detailed_df_gz_display.style.format({
                 "Риск": "{:.2f}", "Успешность": "{:.1%}", "Жалобы": "{:.1%}", "Дискриминативность": "{:.2f}"
             }).background_gradient(subset=["Риск"], cmap="RdYlGn_r"),
-            use_container_width=True
+            use_container_width=True,
+            hide_index=True
         )
         
         st.subheader("🧩 Список групп заданий")
@@ -495,7 +496,8 @@ def _page_lessons_inline(df: pd.DataFrame):
             "Успешность": "{:.1%}",
             "Жалобы": "{:.1%}"
         }),
-        use_container_width=True
+        use_container_width=True,
+        hide_index=True
     )
     
     # Список кликабельных уроков

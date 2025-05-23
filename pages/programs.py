@@ -296,7 +296,8 @@ def page_programs(df: pd.DataFrame):
             subset=["Риск"],
             cmap="RdYlGn_r"
         ),
-        use_container_width=True
+        use_container_width=True,
+        hide_index=True
     )
     
     # 6. Список модулей с кликабельными ссылками

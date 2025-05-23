@@ -740,7 +740,8 @@ def _page_gz_inline(df: pd.DataFrame):
             "Успешность": "{:.1%}",
             "Жалобы": "{:.1%}"
         }),
-        use_container_width=True
+        use_container_width=True,
+        hide_index=True
     )
     
     # Список кликабельных групп заданий
