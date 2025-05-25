@@ -12,6 +12,19 @@ import base64  # используется для кодирования при �
 def render_sidebar():
     """Рендерит основное содержимое сайдбара, включая ссылки на страницы"""
     
+    # Инициализация истории страниц, если ее нет
+    if 'page_history' not in st.session_state:
+        st.session_state.page_history = []
+
+    # Добавление текущей страницы в историю, если она еще не последняя
+    current_page_name = st.session_state.get("current_page", "overview") 
+    # Проверяем, есть ли имя текущей страницы и отличается ли оно от последней записи в истории
+    if current_page_name and (not st.session_state.page_history or st.session_state.page_history[-1] != current_page_name):
+        st.session_state.page_history.append(current_page_name)
+        # Ограничиваем историю 10 последними страницами
+        if len(st.session_state.page_history) > 10:
+            st.session_state.page_history = st.session_state.page_history[-10:]
+    
     # Убираем секцию "Навигация" с кнопками
     
     # Страницы админа, доступные только для ролей admin и methodist_admin
@@ -36,17 +49,35 @@ def render_sidebar():
                     st.query_params = {"page": page}
                     st.rerun()
                 else:
-                    st.query_params.update({"page": page})
+                    st.session_state.current_page = label
+                    st.query_params = {"page": page}
                     st.rerun()
     
     # Страницы методиста, доступные для всех ролей методиста
     if "methodist" in st.session_state.role:
         st.sidebar.subheader("Методистам")
         
-        if st.sidebar.button("📝 Мои задачи", key="sidebar_my_tasks"):
-            st.query_params.update({"page": "my_tasks"})
+        methodist_label = "📝 Мои задачи"
+        methodist_page_key = "my_tasks"
+        if st.sidebar.button(methodist_label, key="sidebar_my_tasks"):
+            st.session_state.current_page = methodist_label
+            st.query_params = {"page": methodist_page_key}
             st.rerun()
     
+    # Раздел История
+    st.sidebar.subheader("История")
+    if st.session_state.page_history:
+        for page_name in reversed(st.session_state.page_history): # Отображаем в обратном порядке (последние вверху)
+            # Для простоты пока будем считать, что имя страницы соответствует ключу для query_params
+            # В будущем это может потребовать более сложной логики для сопоставления имен страниц и их идентификаторов
+            page_key = page_name.lower().replace(" ", "_") # Примерное преобразование в ключ
+            if st.sidebar.button(page_name, key=f"sidebar_history_{page_key}"):
+                st.session_state.current_page = page_name
+                st.query_params = {"page": page_key}
+                st.rerun()
+    else:
+        st.sidebar.markdown("_Пока нет истории_")
+
     st.sidebar.markdown("---")
     st.sidebar.markdown(f"**👤 {st.session_state.username}**")
     st.sidebar.markdown(f"**🔑 {st.session_state.role}**")

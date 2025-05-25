@@ -253,11 +253,3 @@ def page_modules(df: pd.DataFrame):
     st.subheader("📖 Список уроков")
     # display_clickable_items(df_module, "lesson_name", "lesson", metrics=["cards", "risk", "success"])
     display_clickable_items(df_module, "lesson_name", "lesson", metrics=["cards_count", "risk", "success_rate"])
-    
-    # 7. Если урок выбран, показываем встроенную страницу ГЗ
-    if st.session_state.get("filter_lesson"):
-        from .gz import _page_gz_inline
-        
-        # Добавляем разделитель
-        st.markdown("---")
-        _page_gz_inline(df)

@@ -315,11 +315,3 @@ def page_programs(df: pd.DataFrame):
     # Передаем df_prog_sorted, который уже содержит cards_count и переименованные метрики.
     # Метрики, которые мы хотим видеть: 'cards_count', 'risk', 'success_rate'
     display_clickable_items(df_prog_sorted, "module_name", "module", metrics=["cards_count", "risk", "success_rate"]) 
-    
-    # 7. Если модуль выбран, показываем встроенную страницу уроков
-    if st.session_state.get("filter_module"):
-        from .lessons import _page_lessons_inline
-        
-        # Добавляем разделитель
-        st.markdown("---")
-        _page_lessons_inline(df)

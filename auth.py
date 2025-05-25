@@ -129,13 +129,35 @@ def check_authentication():
     return True
 
 def logout():
-    """Выход из системы"""
+    """Выход из системы и полный сброс состояния сессии и URL."""
+    # Сохраняем ключи, которые не нужно удалять (если есть, например, связанные с темами Streamlit)
+    # В данном случае, кажется, можно удалять все, так как init_auth() их пересоздаст.
+    # Но для безопасности, можно выборочно или копировать st.session_state и чистить.
+    
+    # Простой способ: очистить все ключи
+    keys_to_delete = list(st.session_state.keys())
+    for key in keys_to_delete:
+        del st.session_state[key]
+    
+    # Переинициализируем базовые ключи аутентификации (на всякий случай, если init_auth() не вызовется до следующей проверки)
     st.session_state.authenticated = False
     st.session_state.username = None
     st.session_state.user_id = None
     st.session_state.role = None
     st.session_state.user_data = None
     st.session_state.last_activity = None
+    st.session_state.login_error = None
+    # Важно также сбросить current_page и фильтры, но удаление всех ключей это уже делает
+    # st.session_state.current_page = "Обзор" # или None
+    # st.session_state.filter_program = None
+    # ... и другие фильтры ...
+
+    # Сбрасываем URL на базовый (например, страница обзора или корень)
+    # Это предотвратит загрузку последней страницы предыдущего пользователя для нового.
+    st.query_params.clear() # Очищаем все текущие query_params
+    st.query_params = {"page": "overview"} # Устанавливаем на страницу обзора
+    print("[LOGOUT] Session state cleared and query_params reset to overview.")
+    # st.rerun() вызывается в show_user_menu после вызова logout()
 
 def login_page(engine):
     """Отображение страницы входа"""

@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 import navigation_utils
 import re
+import core
 
 def create_hierarchical_header(levels, values, emoji_map=None):
     """
@@ -18,7 +19,6 @@ def create_hierarchical_header(levels, values, emoji_map=None):
         values: Список значений для каждого уровня
         emoji_map: Словарь с эмодзи для каждого уровня
     """
-    import core
     import urllib.parse as ul
     
     if emoji_map is None:
@@ -53,10 +53,14 @@ def create_hierarchical_header(levels, values, emoji_map=None):
         for i, value in enumerate(values):
             if value and i < len(levels):
                 level = levels[i]
-                # Вычисляем целевую страницу
-                target_page = level + "s"
-                if level == "gz":
-                    target_page = "gz"
+                # Вычисляем целевую страницу (человекочитаемое имя)
+                if level == "program": target_page_name = "Программы"
+                elif level == "module": target_page_name = "Модули"
+                elif level == "lesson": target_page_name = "Уроки"
+                elif level == "gz": target_page_name = "ГЗ"
+                elif level == "card": target_page_name = "Карточки"
+                else: target_page_name = level.capitalize() # Fallback
+
                 # Собираем параметры для навигации
                 params = {}
                 for j, l in enumerate(levels[:i+1]):
@@ -65,13 +69,25 @@ def create_hierarchical_header(levels, values, emoji_map=None):
                 # Кнопка навигации
                 key = f"nav_header_{level}_{i}"
                 if st.button(f"{value}", key=key):
-                    # Используем функцию navigate_to вместо прямой установки query_params
-                    navigation_utils.navigate_to(target_page, **params)
+                    # Используем зарегистрированную функцию navigate_to_app из app.py
+                    if hasattr(st, 'navigate_to_app') and callable(st.navigate_to_app):
+                        print(f"[create_hierarchical_header] Navigating to: {target_page_name}, params: {params}") # DEBUG
+                        st.navigate_to_app(target_page_name, **params)
+                    else:
+                        st.error("Функция навигации (header) не настроена!")
             else:
                 st.markdown(f"**{value or '—'}**")
     
     # Добавляем разделитель
     st.markdown("---")
+
+    # Определяем целевую страницу (человекочитаемое имя)
+    if level == "program": target_page_display = "Программы"
+    elif level == "module": target_page_display = "Модули"
+    elif level == "lesson": target_page_display = "Уроки"
+    elif level == "gz": target_page_display = "ГЗ"
+    elif level == "card": target_page_display = "Карточки"
+    else: target_page_display = level.capitalize() # Fallback
 
 def group_programs_by_class(df, column="program"):
     """
@@ -220,25 +236,64 @@ def display_clickable_items(df, column, level, metrics=None):
         if st.session_state.get(f"filter_{filter_col}"):
             current_filters[filter_col] = st.session_state[f"filter_{filter_col}"]
     
-    # Определяем целевую страницу
-    target_page = level + "s"  # Например, program -> programs
-    if level == "gz":
-        target_page = "gz"  # Особый случай для ГЗ
-    elif level == "card":
-        target_page = "cards"
-    
+    # Определяем целевую страницу (человекочитаемое имя) - ИСПРАВЛЕННАЯ ЛОГИКА
+    if level == "program": 
+        target_page_display = "Программы"
+    elif level == "module": 
+        target_page_display = "Модули"
+    elif level == "lesson": 
+        target_page_display = "Уроки"
+    elif level == "gz": 
+        target_page_display = "ГЗ"
+    elif level == "card": 
+        target_page_display = "Карточки"
+    else: 
+        target_page_display = level.capitalize() # Fallback, маловероятен для основных уровней
+
     for i, (_, row) in enumerate(sorted_df.iterrows()):
         current_col = col1 if i < half else col2
         with current_col:
-            # Параметры для navigation
-            url_params = current_filters.copy()
-            url_params[level] = row[column]
+            # НОВЫЙ ПОДХОД: формируем url_params_for_nav только с нужными уровнями
+            url_params_for_nav = {}
+            # target_page_display уже определен выше как человекочитаемое имя ("Программы", "Модули" и т.д.)
+            # level - это ключ уровня элемента, по которому кликаем ("program", "module", "lesson", "gz")
+            # row[column] - это имя элемента (например, имя программы, имя модуля)
+
+            # Копируем фильтры ВЫШЕ текущего `level` из st.session_state
+            # core.FILTERS = ["program", "module", "lesson", "gz"]
+            current_level_index_for_params = -1
+            if level in core.FILTERS: # core должен быть импортирован или FILTERS доступны
+                current_level_index_for_params = core.FILTERS.index(level)
+            
+            for idx, f_key in enumerate(core.FILTERS):
+                if idx < current_level_index_for_params: # Фильтры строго выше текущего уровня
+                    session_filter_value = st.session_state.get(f"filter_{f_key}")
+                    if session_filter_value:
+                        url_params_for_nav[f_key] = session_filter_value
+                elif idx == current_level_index_for_params: # Текущий уровень
+                    url_params_for_nav[f_key] = row[column] # row[column] это имя элемента текущего уровня
+                    break # Останавливаемся, фильтры ниже текущего уровня не нужны
+            
+            # Если level не является стандартным фильтром (например, 'card_id'), 
+            # но его нужно передать, он должен быть в row[column] или params из вызова display_clickable_items.
+            # Эта логика здесь не покрывает произвольные параметры, только иерархические фильтры.
+            # Если display_clickable_items вызывается для карточек, `level` будет 'card', `row[column]` будет card_id.
+            if level not in core.FILTERS and level == "card": # Особый случай для карточек
+                 url_params_for_nav["card_id"] = row[column]
+                 # Также нужно добавить родительские фильтры (program, module, lesson, gz) из session_state
+                 # Это уже должно быть сделано циклом выше, если card_id обрабатывается после них.
+                 # Лучше, если display_clickable_items для карточек получает все родительские фильтры извне.
+
             # Суффикс для ключа по metrics, чтобы ключи были уникальны при разных вызовах
             metrics_suffix = "-".join(metrics) if metrics else ""
             key = f"nav_item_{level}_{metrics_suffix}_{i}"
+
             if st.button(f"{row[column]}", key=key):
-                # Используем функцию navigate_to вместо прямой установки query_params
-                navigation_utils.navigate_to(target_page, **url_params)
+                if hasattr(st, 'navigate_to_app') and callable(st.navigate_to_app):
+                    print(f"[display_clickable_items] Navigating to: {target_page_display}, params: {url_params_for_nav}") # DEBUG
+                    st.navigate_to_app(target_page_display, **url_params_for_nav) 
+                else:
+                    st.error("Функция навигации (clickable_items) не настроена!")
             # Показ метрик рядом с кнопкой
             if metrics:
                 metrics_str = []
@@ -334,17 +389,20 @@ def display_programs_by_class(df, column="program", metrics=None):
         for i, program in enumerate(programs):
             current_col = col1 if i < half else col2
             with current_col:
-                # Параметры для navigation
-                url_params = current_filters.copy()
-                url_params["program"] = program
+                url_params_for_nav = {}
+                # Для display_programs_by_class, `level` всегда "program"
+                # `program` это имя программы из цикла
+                url_params_for_nav["program"] = program 
                 
-                # Суффикс для ключа по metrics, чтобы ключи были уникальны при разных вызовах
                 metrics_suffix = "-".join(metrics) if metrics else ""
                 key = f"nav_item_program_{metrics_suffix}_{class_name}_{i}"
                 
                 if st.button(f"{program}", key=key):
-                    # Используем функцию navigate_to
-                    navigation_utils.navigate_to("programs", **url_params)
+                    if hasattr(st, 'navigate_to_app') and callable(st.navigate_to_app):
+                        print(f"[display_programs_by_class] Navigating to: Программы, params: {url_params_for_nav}") # DEBUG
+                        st.navigate_to_app("Программы", **url_params_for_nav)
+                    else:
+                        st.error("Функция навигации (programs_by_class) не настроена!")
                 
                 # Показ метрик рядом с кнопкой
                 if metrics and program in metrics_dict:

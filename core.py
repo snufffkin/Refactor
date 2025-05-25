@@ -10,6 +10,7 @@ import urllib.parse as ul
 import numpy as np
 import concurrent.futures
 from functools import partial
+import json # <--- ДОБАВЛЯЕМ ИМПОРТ JSON
 
 import pandas as pd
 import streamlit as st
@@ -140,7 +141,7 @@ def load_data(_engine, max_workers=4):
 
 # ---------------- Filters / Risk ------------------------------------------ #
 
-FILTERS: List[str] = ["program_name", "module_name", "lesson_name", "gz_name"]  # Обновлены названия полей
+FILTERS: List[str] = ["program", "module", "lesson", "gz"]  # Ключи, используемые в session_state (filter_program, filter_module, ...)
 
 # Обновленная функция расчета риска на основе интервалов
 # Добавьте эти функции в файл core.py
@@ -663,17 +664,41 @@ def apply_filters(df: pd.DataFrame, upto: Optional[List[str]] = None) -> pd.Data
 
 def reset_child(level: str):
     """
-    Сбрасывает дочерние фильтры относительно указанного уровня.
-    
-    Args:
-        level: Уровень, относительно которого сбрасываются фильтры
+    Сбрасывает дочерние фильтры в st.session_state относительно указанного уровня.
+    Уровень должен быть одним из ключей в FILTERS (program, module, lesson, gz).
+    Например, reset_child("program") сбросит filter_module, filter_lesson, filter_gz.
     """
     if level not in FILTERS:
+        # Если уровень "overview" или что-то выше "program", сбрасываем все
+        if level == "overview" or level is None: # Добавим обработку None для сброса всего
+            for f_key in FILTERS:
+                st.session_state[f"filter_{f_key}"] = None
+                print(f"[CORE.RESET_CHILD] Reset filter_overview: filter_{f_key}")
+            st.session_state.selected_card_id = None # Также сбрасываем card_id
+            st.session_state.selected_assignment_id = None # и assignment_id
+        else:
+            # print(f"[CORE.RESET_CHILD] Unknown level: {level}. No filters reset.")
+            pass # Неизвестный уровень, ничего не делаем или можно вывести предупреждение
         return
     
-    idx = FILTERS.index(level)
-    for col in FILTERS[idx+1:]:
-        st.session_state[f"filter_{col}"] = None
+    start_resetting = False
+    for f_key in FILTERS:
+        if start_resetting:
+            st.session_state[f"filter_{f_key}"] = None
+            print(f"[CORE.RESET_CHILD] Reset: filter_{f_key}")
+        if f_key == level:
+            start_resetting = True
+    
+    # При сбросе уровня, также сбрасываем специфичные ID
+    if level == "program":
+        st.session_state.selected_card_id = None
+        st.session_state.selected_assignment_id = None
+    elif level == "module":
+        st.session_state.selected_card_id = None
+        st.session_state.selected_assignment_id = None # Если задачи привязаны к урокам/ГЗ
+    elif level == "lesson":
+        st.session_state.selected_card_id = None 
+        # selected_assignment_id может быть привязан к карточке, которая ниже ГЗ
 
 # ---------------- Aggregation --------------------------------------------- #
 
@@ -1190,12 +1215,20 @@ def load_all_data_for_level(level="overview", program=None, module=None, lesson=
 @st.cache_data(ttl=3600)  # Кэширование на 1 час
 def load_navigation_data(_engine=None):
     """
-    Загружает все данные из таблицы cards_structure для навигации и фильтрации.
+    Загружает все данные из таблицы cards_structure, объединенные с program_short_name из program_ids,
+    для навигации и фильтрации.
     """
     if _engine is None:
         _engine = get_engine()
     
-    sql = text("SELECT * FROM cards_structure")
+    # Обновленный SQL-запрос для включения program_short_name
+    sql = text("""
+        SELECT 
+            cs.*,
+            p.program_short_name
+        FROM cards_structure cs
+        LEFT JOIN program_ids p ON cs.program_id = p.program_id
+    """)
     return pd.read_sql(sql, _engine)
 
 @st.cache_data(ttl=300)  # Кэширование на 5 минут
@@ -1231,3 +1264,175 @@ def get_active_tasks_count(_engine, user_id: int) -> int:
     except Exception as e:
         print(f"Error counting active tasks: {e}")
         return 0
+
+# ------------------ User Action History --------------------- #
+
+@st.cache_data(ttl=60) # Кэшируем на короткое время, чтобы не дергать БД слишком часто при одинаковых фильтрах
+def get_context_ids_by_names(_engine, program_name: Optional[str] = None, module_name: Optional[str] = None, lesson_name: Optional[str] = None, gz_name: Optional[str] = None, card_id_param: Optional[Any] = None) -> Dict[str, Any]: # Изменен тип возвращаемого значения
+    """
+    Получает числовые ID для программы, модуля, урока, ГЗ и карточки, а также program_short_name.
+    Использует данные из cards_structure (которая теперь включает program_short_name).
+
+    Args:
+        _engine: SQLAlchemy engine.
+        program_name (Optional[str]): Название программы.
+        module_name (Optional[str]): Название модуля.
+        lesson_name (Optional[str]): Название урока.
+        gz_name (Optional[str]): Название ГЗ.
+        card_id_param (Optional[Any]): ID карточки.
+
+    Returns:
+        Dict[str, Any]: Словарь с ключами 'program_id', 'module_id', 'lesson_id', 'gz_id', 'card_id', 'program_short_name'.
+                                   Значения ID будут None, если не найдены. program_short_name будет None, если не найден.
+    """
+    ids = {
+        "program_id": None,
+        "module_id": None,
+        "lesson_id": None,
+        "gz_id": None,
+        "card_id": None,
+        "program_short_name": None # Добавлено новое поле
+    }
+    
+    # Попытка преобразовать card_id_param в int, если он не None
+    if card_id_param is not None:
+        try:
+            ids["card_id"] = int(card_id_param)
+        except (ValueError, TypeError):
+            print(f"Warning: card_id_param '{card_id_param}' could not be converted to int. Will proceed without it for ID fetching.")
+            # card_id_param остается не-None, но ids["card_id"] будет None, если конвертация не удалась
+            # Это важно, чтобы не пытаться фильтровать по некорректному card_id дальше
+
+    if not any([program_name, module_name, lesson_name, gz_name, ids["card_id"] is not None]):
+        return ids
+
+    try:
+        df_structure = load_navigation_data(_engine=_engine)
+        if df_structure.empty:
+            print("Warning: cards_structure is empty. Cannot fetch context IDs.")
+            return ids
+
+        filtered_df = df_structure.copy()
+
+        # Если card_id известен и валиден, он однозначно определяет строку
+        if ids["card_id"] is not None:
+            filtered_df = filtered_df[filtered_df['card_id'] == ids["card_id"]]
+            if not filtered_df.empty:
+                first_match = filtered_df.iloc[0]
+                ids["program_id"] = int(first_match["program_id"]) if pd.notna(first_match["program_id"]) else None
+                ids["module_id"] = int(first_match["module_id"]) if pd.notna(first_match["module_id"]) else None
+                ids["lesson_id"] = int(first_match["lesson_id"]) if pd.notna(first_match["lesson_id"]) else None
+                ids["gz_id"] = int(first_match["gz_id"]) if pd.notna(first_match["gz_id"]) else None
+                ids["program_short_name"] = first_match["program_short_name"] if pd.notna(first_match["program_short_name"]) else None # Получаем short_name
+                # ids["card_id"] уже установлен
+                return ids 
+            else:
+                # card_id был предоставлен, но не найден в структуре. Это странно.
+                print(f"Warning: Provided card_id {ids['card_id']} not found in cards_structure.")
+                ids["card_id"] = None # Сбрасываем, чтобы не мешать дальнейшему поиску по именам, если он нужен
+                # Если card_id был единственным параметром, то вернем пустые ids
+                if not any([program_name, module_name, lesson_name, gz_name]):
+                    return ids
+                # Пересоздаем filtered_df из оригинала для поиска по именам
+                filtered_df = df_structure.copy() 
+
+        # Если card_id не был предоставлен или не найден, фильтруем по именам
+        if program_name:
+            filtered_df = filtered_df[filtered_df['program_name'] == program_name]
+        if module_name and not filtered_df.empty:
+            filtered_df = filtered_df[filtered_df['module_name'] == module_name]
+        if lesson_name and not filtered_df.empty:
+            filtered_df = filtered_df[filtered_df['lesson_name'] == lesson_name]
+        if gz_name and not filtered_df.empty:
+            filtered_df = filtered_df[filtered_df['gz_name'] == gz_name]
+
+        if not filtered_df.empty:
+            first_match = filtered_df.iloc[0]
+            ids["program_id"] = int(first_match["program_id"]) if pd.notna(first_match["program_id"]) else None
+            ids["module_id"] = int(first_match["module_id"]) if pd.notna(first_match["module_id"]) else None
+            ids["lesson_id"] = int(first_match["lesson_id"]) if pd.notna(first_match["lesson_id"]) else None
+            ids["gz_id"] = int(first_match["gz_id"]) if pd.notna(first_match["gz_id"]) else None
+            ids["program_short_name"] = first_match["program_short_name"] if pd.notna(first_match["program_short_name"]) else None # Получаем short_name
+            # card_id может быть уже установлен, если он пришел как параметр и был валиден
+            # Если он не был установлен, и мы нашли его по именам, устанавливаем сейчас
+            if ids["card_id"] is None and pd.notna(first_match["card_id"]):
+                 ids["card_id"] = int(first_match["card_id"])
+        else:
+            print(f"Warning: No match found in cards_structure for filters: P={program_name}, M={module_name}, L={lesson_name}, GZ={gz_name}")
+
+    except Exception as e:
+        print(f"Error in get_context_ids_by_names: {e}")
+    
+    return ids
+
+def log_user_action(_engine, user_id: Optional[int], action_type: str, page_key: str, 
+                    context_ids: Optional[Dict[str, Optional[int]]] = None, 
+                    display_name: Optional[str] = None, 
+                    url_params: Optional[Dict[str, Any]] = None):
+    """
+    Записывает действие пользователя в таблицу action_history.
+
+    Args:
+        _engine: SQLAlchemy engine.
+        user_id (Optional[int]): ID пользователя.
+        action_type (str): Тип действия (например, 'navigate_page').
+        page_key (str): Ключ страницы (например, 'overview', 'programs').
+        context_ids (Optional[Dict[str, Optional[int]]]): Словарь с ID ('program_id', 'module_id', etc.).
+        display_name (Optional[str]): Человекочитаемое имя страницы/контекста.
+        url_params (Optional[Dict[str, Any]]): Словарь с параметрами URL (будет сохранен как JSON).
+    """
+    if user_id is None:
+        print("Critical: user_id is None. Skipping action logging.")
+        return
+    try:
+        user_id = int(user_id) # Убедимся, что user_id это int
+    except (ValueError, TypeError):
+        print(f"Critical: user_id '{user_id}' is not a valid integer. Skipping action logging.")
+        return
+
+    insert_query = text("""
+        INSERT INTO action_history (
+            user_id, action_type, page_key,
+            target_program_id, target_module_id, target_lesson_id, target_gz_id, target_card_id, target_assignment_id,
+            display_name, url_params
+        ) VALUES (
+            :user_id, :action_type, :page_key,
+            :program_id, :module_id, :lesson_id, :gz_id, :card_id, :assignment_id,
+            :display_name, :url_params_json
+        )
+    """)
+
+    params_to_insert = {
+        "user_id": user_id,
+        "action_type": action_type,
+        "page_key": page_key,
+        "program_id": context_ids.get("program_id") if context_ids else None,
+        "module_id": context_ids.get("module_id") if context_ids else None,
+        "lesson_id": context_ids.get("lesson_id") if context_ids else None,
+        "gz_id": context_ids.get("gz_id") if context_ids else None,
+        "card_id": context_ids.get("card_id") if context_ids else None,
+        "assignment_id": context_ids.get("assignment_id") if context_ids else None, # Добавим позже, если нужно
+        "display_name": display_name,
+        "url_params_json": json.dumps(url_params) if url_params else None # ИСПОЛЬЗУЕМ json.dumps
+    }
+    
+    # Проверка типов для ID, чтобы избежать ошибок при вставке
+    for id_key in ["program_id", "module_id", "lesson_id", "gz_id", "card_id", "assignment_id"]:
+        if params_to_insert[id_key] is not None:
+            try:
+                params_to_insert[id_key] = int(params_to_insert[id_key])
+            except (ValueError, TypeError):
+                print(f"Warning: Could not convert {id_key} ('{params_to_insert[id_key]}') to int. Setting to None.")
+                params_to_insert[id_key] = None
+
+
+    try:
+        with _engine.connect() as connection:
+            connection.execute(insert_query, params_to_insert)
+            connection.commit()
+            print(f"Action logged: {action_type} by user {user_id} for page {page_key}")
+    except Exception as e:
+        print(f"Error logging user action: {e}")
+        # В случае ошибки можно попробовать откатить транзакцию, если она была начата явно,
+        # но здесь connect() управляет транзакцией.
+        # Важно не прерывать основное выполнение приложения из-за ошибки логирования.
