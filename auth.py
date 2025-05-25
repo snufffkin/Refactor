@@ -160,24 +160,69 @@ def logout():
     # st.rerun() вызывается в show_user_menu после вызова logout()
 
 def login_page(engine):
-    """Отображение страницы входа"""
-    st.title("🔐 Вход в систему")
+    """Отображение страницы входа и регистрации"""
     
-    with st.form("login_form"):
-        username = st.text_input("Имя пользователя")
-        password = st.text_input("Пароль", type="password")
-        submitted = st.form_submit_button("Войти")
+    # Используем st.query_params для определения, какую вкладку показать по умолчанию
+    query_params = st.query_params
+    active_tab_key = query_params.get("form", "login") # "login" или "register"
+
+    # Создаем вкладки
+    # Чтобы управлять активной вкладкой через URL, нам нужен более сложный подход или использование компонента.
+    # Streamlit st.tabs не позволяет напрямую управлять активной вкладкой через код после создания.
+    # Простой вариант: две разные формы, показываемые по условию.
+    # Более продвинутый: кнопки, меняющие параметр в URL, который затем используется для выбора формы.
+
+    # Для простоты, пока сделаем две секции и дадим пользователю возможность выбрать.
+    # Или можно использовать радиокнопки для выбора действия.
+
+    action_choice = st.radio("Выберите действие:", ("Вход", "Регистрация"), horizontal=True, key="action_choice")
+
+    if action_choice == "Вход":
+        st.subheader("🔐 Вход в систему")
+        with st.form("login_form"):
+            username_login = st.text_input("Имя пользователя", key="login_username")
+            password_login = st.text_input("Пароль", type="password", key="login_password")
+            submitted_login = st.form_submit_button("Войти")
+            
+            if submitted_login:
+                if authenticate(username_login, password_login, engine):
+                    # Сбрасываем query_params, чтобы при обновлении не оставался ?form=register
+                    st.query_params.clear()
+                    st.query_params = {"page": st.session_state.get("current_page", "overview").lower().replace(" ","_")}
+                    st.rerun()
         
-        if submitted:
-            # Пытаемся аутентифицировать и при успехе перезапускаем приложение
-            if authenticate(username, password, engine):
-                st.rerun()
+        if st.session_state.get("login_error"):
+            st.error(st.session_state.login_error)
+
+    elif action_choice == "Регистрация":
+        st.subheader("📝 Регистрация нового пользователя")
+        with st.form("register_form"):
+            reg_username = st.text_input("Имя пользователя (логин)", key="reg_username")
+            reg_email = st.text_input("Email", key="reg_email")
+            reg_full_name = st.text_input("Полное имя", key="reg_fullname")
+            reg_password = st.text_input("Пароль (мин. 6 символов)", type="password", key="reg_password")
+            reg_password_confirm = st.text_input("Подтвердите пароль", type="password", key="reg_password_confirm")
+            
+            # Выбор роли (можно сделать более гибким, если ролей много)
+            available_roles = ["methodist", "admin"] # Пример
+            reg_role = st.selectbox("Роль", available_roles, key="reg_role")
+            
+            submitted_register = st.form_submit_button("Зарегистрироваться")
+
+            if submitted_register:
+                if reg_password != reg_password_confirm:
+                    st.error("Пароли не совпадают!")
+                else:
+                    success, message = register_user(engine, reg_username, reg_password, reg_email, reg_full_name, reg_role)
+                    if success:
+                        st.success("Пользователь успешно зарегистрирован! Теперь вы можете войти.")
+                        # Можно автоматически переключить на вкладку входа или предложить это
+                        # Для простоты, пользователь сам переключится.
+                    else:
+                        st.error(message)
     
-    if st.session_state.login_error:
-        st.error(st.session_state.login_error)
-    
-    # Информация о тестовых пользователях
-    with st.expander("Информация для тестирования"):
+    # Информация о тестовых пользователях (можно оставить или убрать для регистрации)
+    with st.expander("Информация для тестирования (существующие пользователи)"):
         st.markdown("""
         ### Тестовые пользователи:
         
@@ -449,3 +494,68 @@ def get_assignment_history(engine, assignment_id: int) -> pd.DataFrame:
     except Exception as e:
         st.error(f"Ошибка при получении истории изменений: {str(e)}")
         return pd.DataFrame()
+
+def register_user(engine, username, password, email, full_name, role="methodist") -> tuple[bool, Optional[str]]:
+    """
+    Регистрирует нового пользователя в системе.
+
+    Args:
+        engine: SQLAlchemy engine.
+        username (str): Имя пользователя (логин).
+        password (str): Пароль.
+        email (str): Email пользователя.
+        full_name (str): Полное имя пользователя.
+        role (str): Роль пользователя (по умолчанию 'methodist').
+
+    Returns:
+        tuple[bool, Optional[str]]: (True, None) при успехе, (False, "сообщение об ошибке") при неудаче.
+    """
+    if not username or not password or not email:
+        return False, "Имя пользователя, пароль и email не могут быть пустыми."
+    
+    # Проверка длины пароля (пример)
+    if len(password) < 6:
+        return False, "Пароль должен быть не менее 6 символов."
+
+    try:
+        # Используем engine.begin() для явного управления транзакцией на уровне engine
+        with engine.begin() as conn: # conn здесь будет частью внешней транзакции
+            # Проверка, существует ли уже пользователь с таким username
+            res_username = conn.execute(text("SELECT user_id FROM users WHERE username = :username"), {"username": username}).fetchone()
+            if res_username:
+                # Мы не хотим откатывать транзакцию здесь, просто возвращаем ошибку
+                return False, f"Пользователь с именем '{username}' уже существует."
+            
+            # Проверка, существует ли уже пользователь с таким email
+            res_email = conn.execute(text("SELECT user_id FROM users WHERE email = :email"), {"email": email}).fetchone()
+            if res_email:
+                return False, f"Пользователь с email '{email}' уже существует."
+            
+            # Хеширование пароля
+            password_hash = hashlib.sha256(password.encode()).hexdigest()
+            
+            # Вставка нового пользователя
+            conn.execute(text("""
+                INSERT INTO users (username, password_hash, email, full_name, role, is_active)
+                VALUES (:username, :password_hash, :email, :full_name, :role, :is_active)
+            """), {
+                "username": username,
+                "password_hash": password_hash,
+                "email": email,
+                "full_name": full_name,
+                "role": role,
+                "is_active": True 
+            })
+            # Если мы дошли сюда без ошибок, engine.begin() автоматически закоммитит транзакцию при выходе из блока with
+            return True, None
+            # Явный trans.commit() или trans.rollback() не нужны при использовании with engine.begin()
+
+    except Exception as e:
+        # Если возникла любая ошибка (включая ошибки уникальности constraint violation при INSERT, 
+        # которые могли быть не пойманы проверками выше, если они не атомарны с INSERT),
+        # with engine.begin() автоматически откатит транзакцию.
+        print(f"Error in register_user (transaction rolled back): {e}")
+        # Можно вернуть более специфичное сообщение, если e - это ошибка БД
+        if "UNIQUE constraint failed" in str(e) or "duplicate key value violates unique constraint" in str(e):
+             return False, "Имя пользователя или email уже заняты (ошибка БД)."
+        return False, f"Общая ошибка при регистрации: {e}"
