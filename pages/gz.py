@@ -469,7 +469,12 @@ def page_gz(df_cards_input: pd.DataFrame, create_link_fn=None):
                     card_id = int(row["card_id"])
                     if st.button(f"Перейти к карточке {card_id}", key=f"gz_tricky_nav_{card_id}"):
                         # Навигация без сброса сессии
-                        navigation_utils.navigate_to("cards", card_id=str(card_id))
+                        if hasattr(st, 'navigate_to_app'):
+                            st.navigate_to_app("Карточки", card_id=str(card_id))
+                        else:
+                            st.query_params.clear()
+                            st.query_params["page"] = "cards"
+                            st.query_params["card_id"] = str(card_id)
                         st.rerun()
         else:
             st.info("В этой группе заданий нет трики-карточек.")
@@ -554,13 +559,30 @@ def page_gz(df_cards_input: pd.DataFrame, create_link_fn=None):
             st.dataframe(display_df, hide_index=True, use_container_width=True)
             # Кнопки для перехода к детальному анализу карточек
             # Удаляем дубликаты по card_id перед генерацией кнопок
-            unique_low_discr_cards_for_buttons = low_discr_cards.drop_duplicates(subset=['card_id'], keep='first')
-            for _, row in unique_low_discr_cards_for_buttons.iterrows():
-                card_id = int(row['card_id'])
-                if st.button(f"Перейти к карточке {card_id}", key=f"gz_lowdiscr_nav_list_{card_id}"):
-                    # Навигация без сброса сессии
-                    navigation_utils.navigate_to("cards", card_id=str(card_id))
-                    st.rerun()
+            unique_low_discr_cards_for_buttons_list = low_discr_cards.drop_duplicates(subset=['card_id'], keep='first')
+            
+            # DEBUG: Вывод содержимого unique_low_discr_cards_for_buttons_list
+            st.write("DEBUG unique_low_discr_cards_for_buttons_list (вкладка Дискриминативность):", unique_low_discr_cards_for_buttons_list[['card_id', 'card_order', 'discrimination_avg', 'card_type']])
+            st.write(f"Дубликаты card_id: {unique_low_discr_cards_for_buttons_list.duplicated(subset=['card_id']).sum()}")
+            st.write(f"Записи для card_id 259085: {unique_low_discr_cards_for_buttons_list[unique_low_discr_cards_for_buttons_list['card_id'] == 259085]}")
+
+            if not unique_low_discr_cards_for_buttons_list.empty:
+                for _, card in unique_low_discr_cards_for_buttons_list.iterrows():
+                    card_id = int(card["card_id"])
+                    discr = card["discrimination_avg"]
+                    card_order = int(card["card_order"])
+                    color = "purple"
+                    key = f"gz_lowdiscr_nav_list_{card_id}"
+                    if st.button(f"№{card_order}: ID {card_id} - Дискр.: {discr:.2f} - {card['card_type']}", key=key):
+                        if hasattr(st, 'navigate_to_app'):
+                            st.navigate_to_app("Карточки", card_id=str(card_id))
+                        else:
+                            st.query_params.clear()
+                            st.query_params["page"] = "cards"
+                            st.query_params["card_id"] = str(card_id)
+                        st.rerun()
+                if len(unique_low_discr_cards_for_buttons_list) > 12:
+                    st.info(f"И еще {len(unique_low_discr_cards_for_buttons_list) - 12} карточек...")
     
     # 5. Таблица с карточками и ссылками на карточки
     st.subheader("📋 Детальная информация по карточкам")
@@ -631,9 +653,14 @@ def page_gz(df_cards_input: pd.DataFrame, create_link_fn=None):
     for _, row in unique_cards_df_for_buttons.iterrows():
         card_id = int(row['card_id'])
         card_order = int(row['card_order'])
-        if st.button(f"Перейти к карточке {card_id} (№{card_order})", key=f"gz_detail_nav_{card_id}"):
+        if st.button(f"Перейти к карточке {card_id} (№{card_order})", key=f"gz_goto_card_{card_id}"):
             # Навигация без сброса сессии
-            navigation_utils.navigate_to("cards", card_id=str(card_id))
+            if hasattr(st, 'navigate_to_app'):
+                st.navigate_to_app("Карточки", card_id=str(card_id))
+            else:
+                st.query_params.clear()
+                st.query_params["page"] = "cards"
+                st.query_params["card_id"] = str(card_id)
             st.rerun()
     
     # 6. Кнопки для быстрого перехода ко всем карточкам, сортированные по card_order
@@ -646,7 +673,12 @@ def page_gz(df_cards_input: pd.DataFrame, create_link_fn=None):
         color = "red" if risk > 0.75 else ("orange" if risk > 0.5 else ("gold" if risk > 0.25 else "green"))
         key = f"gz_card_nav_{card_id}"
         if st.button(f"№{card_order}: ID {card_id} - Риск: {risk:.2f} - {card_type}", key=key):
-            navigation_utils.navigate_to("cards", card_id=str(card_id))
+            if hasattr(st, 'navigate_to_app'):
+                st.navigate_to_app("Карточки", card_id=str(card_id))
+            else:
+                st.query_params.clear()
+                st.query_params["page"] = "cards"
+                st.query_params["card_id"] = str(card_id)
             st.rerun()
         # Специальные флаги
         special_flags = []
@@ -674,29 +706,16 @@ def page_gz(df_cards_input: pd.DataFrame, create_link_fn=None):
             color = "red" if trickiness == 3 else ("orange" if trickiness == 2 else "gold")
             key = f"gz_tricky_nav_list_{card_id}"
             if st.button(f"№{card_order}: ID {card_id} - Подлость: {trickiness} - {card['card_type']}", key=key):
-                navigation_utils.navigate_to("cards", card_id=str(card_id))
+                if hasattr(st, 'navigate_to_app'):
+                    st.navigate_to_app("Карточки", card_id=str(card_id))
+                else:
+                    st.query_params.clear()
+                    st.query_params["page"] = "cards"
+                    st.query_params["card_id"] = str(card_id)
                 st.rerun()
         # Отображаем оставшиеся карточки при большом числе
         if len(unique_tricky_cards_for_buttons_list) > 12:
             st.info(f"И еще {len(unique_tricky_cards_for_buttons_list) - 12} карточек...")
-    
-    # Создаем список карточек с низкой дискриминативностью
-    low_discr_cards = df_cards[df_cards["discrimination_avg"] < 0.15].sort_values("card_order")
-    unique_low_discr_cards_for_buttons_list = low_discr_cards.drop_duplicates(subset=['card_id'], keep='first')
-    
-    if not unique_low_discr_cards_for_buttons_list.empty:
-        st.markdown("### Карточки с низкой дискриминативностью")
-        for _, card in unique_low_discr_cards_for_buttons_list.iterrows():
-            card_id = int(card["card_id"])
-            discr = card["discrimination_avg"]
-            card_order = int(card["card_order"])
-            color = "purple"
-            key = f"gz_lowdiscr_nav_list_{card_id}"
-            if st.button(f"№{card_order}: ID {card_id} - Дискр.: {discr:.2f} - {card['card_type']}", key=key):
-                navigation_utils.navigate_to("cards", card_id=str(card_id))
-                st.rerun()
-        if len(unique_low_discr_cards_for_buttons_list) > 12:
-            st.info(f"И еще {len(unique_low_discr_cards_for_buttons_list) - 12} карточек...")
 
 def _page_gz_inline(df: pd.DataFrame):
     """Встроенная версия страницы групп заданий для отображения на странице урока"""
