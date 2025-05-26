@@ -17,12 +17,50 @@ from components.metrics import display_metrics_row, display_status_chart, displa
 from components.charts import display_cards_chart, display_risk_bar_chart, display_metrics_comparison, display_success_complaints_chart, display_completion_radar, display_trickiness_chart, display_trickiness_success_chart
 import navigation_utils
 
-def page_gz(df_cards_input: pd.DataFrame, create_link_fn=None):
+def page_gz(df_cards_input: pd.DataFrame, eng, create_link_fn=None):
     """Страница группы заданий с детализацией по карточкам"""
     prog_name = st.session_state.get('filter_program')
     module_name = st.session_state.get('filter_module')
     lesson_name = st.session_state.get('filter_lesson')
     gz_name = st.session_state.get('filter_gz')
+
+    # ОПРЕДЕЛЯЕМ КАРТЫ ЦВЕТОВ И ИКОНОК ОДИН РАЗ В НАЧАЛЕ ФУНКЦИИ
+    status_color_map_gz = {
+        "new": "blue", "in_work": "orange", "review": "purple",
+        "ready_for_qc": "violet", "done": "green", "wont_fix": "red", "archive": "grey"
+    }
+    status_icon_map_gz = {
+        "new": ":material/fiber_new:", "in_work": ":material/construction:", "review": ":material/rate_review:",
+        "ready_for_qc": ":material/checklist:", "done": ":material/check_circle:",
+        "wont_fix": ":material/cancel:", "archive": ":material/archive:"
+    }
+
+    # Фильтрация df_cards_input до любых операций с ним, чтобы df_gz был актуальным
+    # (Предполагается, что df_cards_input уже загружен и может содержать карточки из разных ГЗ)
+    if df_cards_input is not None and not df_cards_input.empty and gz_name:
+        df_gz_current = df_cards_input[
+            (df_cards_input.get("program_name") == prog_name) &
+            (df_cards_input.get("module_name") == module_name) &
+            (df_cards_input.get("lesson_name") == lesson_name) &
+            (df_cards_input.get("gz_name") == gz_name)
+        ].copy() # Используем .get для безопасности, если колонки могут отсутствовать
+    else:
+        df_gz_current = pd.DataFrame() # Пустой DataFrame, если входные данные некорректны
+
+    # Отображение УНИКАЛЬНЫХ статусов карточек в текущей ГЗ (В САМОМ ВЕРХУ)
+    if not df_gz_current.empty and "status" in df_gz_current.columns:
+        unique_statuses = df_gz_current["status"].dropna().unique()
+        unique_statuses.sort() # Для консистентного порядка
+        
+        if len(unique_statuses) > 0:
+            # Карты для отображения статусов - теперь используются глобальные для функции
+            badge_html_list_top = []
+            for status_val in unique_statuses:
+                color = status_color_map_gz.get(status_val, "grey") # Используем общую карту
+                # Только текст статуса, без иконок и доп. слов
+                badge_html_list_top.append(f"<span style='display:inline-block; background-color:{color}; color:white; padding:0.2em 0.6em; border-radius:0.7em; font-weight:bold; font-size:0.9em; margin-right:5px; margin-bottom:5px;'>{status_val.capitalize()}</span>")
+            st.markdown(" ".join(badge_html_list_top), unsafe_allow_html=True)
+            st.markdown("<hr style='margin-top: 5px; margin-bottom: 10px;'>", unsafe_allow_html=True) # Горизонтальная линия для отделения
 
     if not prog_name or not module_name or not lesson_name or not gz_name:
         st.warning("Фильтры программы, модуля, урока или ГЗ не установлены.")
@@ -45,12 +83,7 @@ def page_gz(df_cards_input: pd.DataFrame, create_link_fn=None):
         st.error(f"Входные данные для страницы ГЗ не содержат необходимых колонок для проверки фильтров: {missing_cols}. Доступные: {df_cards_input.columns.tolist()}")
         return
 
-    df_gz = df_cards_input[
-        (df_cards_input["program_name"] == prog_name) &
-        (df_cards_input["module_name"] == module_name) &
-        (df_cards_input["lesson_name"] == lesson_name) &
-        (df_cards_input["gz_name"] == gz_name)
-    ].copy()
+    df_gz = df_gz_current # Используем уже отфильтрованный DataFrame
     
     if df_gz.empty:
         st.warning(f"Нет данных для ГЗ '{gz_name}' в уроке '{lesson_name}', модуль '{module_name}', программа '{prog_name}'. Проверьте, что данные были корректно загружены для этого уровня.")
@@ -61,7 +94,7 @@ def page_gz(df_cards_input: pd.DataFrame, create_link_fn=None):
         levels=["program", "module", "lesson", "gz"],
         values=[prog_name, module_name, lesson_name, gz_name]
     )
-    
+
     # 1. Метрики группы заданий
     st.subheader("📈 Метрики группы заданий")
     display_metrics_row(df_gz)
@@ -127,6 +160,47 @@ def page_gz(df_cards_input: pd.DataFrame, create_link_fn=None):
     # Сортируем данные по номеру карточки
     df_cards = df_cards.sort_values("card_order").reset_index(drop=True)
     
+    # Получаем СВЕЖИЕ СТАТУСЫ для всех карточек в текущей ГЗ
+    if not df_cards.empty and "card_id" in df_cards.columns:
+        list_of_card_ids = df_cards["card_id"].dropna().unique().tolist()
+        print(f"[DEBUG page_gz] list_of_card_ids to fetch statuses for: {list_of_card_ids}")
+        if list_of_card_ids:
+            try:
+                print(f"[page_gz] Attempting to fetch fresh statuses for {len(list_of_card_ids)} cards using provided engine.")
+                df_fresh_statuses_gz = core.get_fresh_card_statuses(eng, list_of_card_ids) # Используем переданный eng
+
+                if not df_fresh_statuses_gz.empty:
+                    status_map = pd.Series(df_fresh_statuses_gz.status.values, index=df_fresh_statuses_gz.card_id).to_dict()
+                    # Обновляем столбец 'status' в df_cards, сохраняя существующие значения, если свежий статус не найден
+                    # И обрабатываем NaN/None изначальные статусы
+                    def update_status(row):
+                        fresh_status = status_map.get(row['card_id'])
+                        if fresh_status is not None and not pd.isna(fresh_status):
+                            return fresh_status
+                        elif pd.isna(row['status']): # Если старый статус был NaN/None и свежего нет
+                            return 'unknown'
+                        return row['status'] # Возвращаем старый, если он не NaN/None и свежего нет
+                    
+                    df_cards['status'] = df_cards.apply(update_status, axis=1)
+                    print(f"[page_gz] Fresh statuses applied to df_cards.")
+                else:
+                    print(f"[page_gz] No fresh statuses returned for card_ids: {list_of_card_ids}. Ensuring NaN statuses are 'unknown'.")
+                    df_cards['status'] = df_cards['status'].apply(lambda x: 'unknown' if pd.isna(x) else str(x))
+            except Exception as e_gz_status:
+                st.error(f"Ошибка при получении свежих статусов для ГЗ: {e_gz_status}")
+                print(f"[page_gz] Exception when fetching/applying fresh statuses: {e_gz_status}")
+                df_cards['status'] = df_cards['status'].apply(lambda x: 'unknown' if pd.isna(x) else str(x))
+        else: # Если нет list_of_card_ids (например, все card_id были NaN)
+            print("[page_gz] No valid card_ids to fetch fresh statuses. Ensuring NaN statuses are 'unknown'.")
+            if "status" in df_cards.columns:
+                df_cards['status'] = df_cards['status'].apply(lambda x: 'unknown' if pd.isna(x) else str(x))
+            else:
+                df_cards['status'] = 'unknown'
+    elif "status" in df_cards.columns: # Если нет card_id в df_cards, но есть столбец status
+        df_cards['status'] = df_cards['status'].apply(lambda x: 'unknown' if pd.isna(x) else str(x))
+    else: # Если нет ни card_id, ни status
+        df_cards['status'] = 'unknown'
+
     # Создаем столбчатую диаграмму риска по карточкам напрямую через Plotly
     st.subheader("📊 Уровень риска по карточкам")
     
@@ -620,7 +694,22 @@ def page_gz(df_cards_input: pd.DataFrame, create_link_fn=None):
     display_df["Номер"] = cards_df["card_order"]
     display_df["ID карточки"] = cards_df["card_id"]
     display_df["Тип"] = cards_df["card_type"]
-    display_df["Статус"] = cards_df["status"]
+    # display_df["Статус"] = cards_df["status"] # Заменим на HTML badge
+
+    def create_status_badge(status):
+        if pd.isna(status):
+            status = "unknown"
+        color = status_color_map_gz.get(status, "grey")
+        icon = status_icon_map_gz.get(status, ":material/help:")
+        # Важно: st.dataframe не рендерит markdown или HTML напрямую.
+        # Поэтому просто вернем текстовый статус, а бейджи отобразим отдельно.
+        # Либо, если нужно именно в таблице, придется использовать st.markdown для всей таблицы построчно.
+        # Для простоты пока вернем текстовый статус, а ниже рассмотрим вывод бейджей.
+        # Возвращаем сам статус для таблицы, а бейджи сделаем ниже или в другом месте.
+        # return f"<span style='display:inline-flex; align-items:center; gap:0.3em; background-color:{color}; color:white; padding:0.1em 0.5em; border-radius:0.5em; font-weight:bold; font-size:0.85em;'>{icon} {status.capitalize()}</span>"
+        return status # Пока оставляем текстовый статус для st.dataframe
+
+    display_df["Статус"] = cards_df["status"].apply(create_status_badge)
     display_df["Успешность"] = cards_df["success_rate"].apply(lambda x: f"{x:.1%}" if pd.notnull(x) else "N/A")
     display_df["Успех с 1-й"] = cards_df["first_try_success_rate"].apply(lambda x: f"{x:.1%}" if pd.notnull(x) else "N/A")
     display_df["Жалобы (%)"] = cards_df["complaint_rate"].apply(lambda x: f"{x:.1%}" if pd.notnull(x) else "N/A")
@@ -647,40 +736,62 @@ def page_gz(df_cards_input: pd.DataFrame, create_link_fn=None):
     
     # Отображаем таблицу
     st.dataframe(display_df, hide_index=True, use_container_width=True)
-    # Кнопки для перехода к детальному анализу карточек
-    # Удаляем дубликаты по card_id перед генерацией кнопок
-    unique_cards_df_for_buttons = cards_df.drop_duplicates(subset=['card_id'], keep='first')
-    for _, row in unique_cards_df_for_buttons.iterrows():
-        card_id = int(row['card_id'])
-        card_order = int(row['card_order'])
-        if st.button(f"Перейти к карточке {card_id} (№{card_order})", key=f"gz_goto_card_{card_id}"):
-            # Навигация без сброса сессии
-            if hasattr(st, 'navigate_to_app'):
-                st.navigate_to_app("Карточки", card_id=str(card_id))
-            else:
-                st.query_params.clear()
-                st.query_params["page"] = "cards"
-                st.query_params["card_id"] = str(card_id)
-            st.rerun()
-    
+
     # 6. Кнопки для быстрого перехода ко всем карточкам, сортированные по card_order
     st.subheader("🔍 Все карточки в группе заданий")
+
     for _, card in df_cards.sort_values("card_order").iterrows():
         card_id = int(card["card_id"])
         risk = card["risk"]
         card_type = card["card_type"]
         card_order = int(card["card_order"])
-        color = "red" if risk > 0.75 else ("orange" if risk > 0.5 else ("gold" if risk > 0.25 else "green"))
-        key = f"gz_card_nav_{card_id}"
-        if st.button(f"№{card_order}: ID {card_id} - Риск: {risk:.2f} - {card_type}", key=key):
-            if hasattr(st, 'navigate_to_app'):
-                st.navigate_to_app("Карточки", card_id=str(card_id))
-            else:
-                st.query_params.clear()
-                st.query_params["page"] = "cards"
-                st.query_params["card_id"] = str(card_id)
-            st.rerun()
-        # Специальные флаги
+        current_card_status = card.get("status", "unknown")
+        if pd.isna(current_card_status):
+            current_card_status = "unknown"
+        else:
+            current_card_status = str(current_card_status)
+        
+        status_color = status_color_map_gz.get(current_card_status, "#808080") # Цвет по умолчанию (серый)
+        status_text = current_card_status.capitalize()
+        
+        # HTML для компактного бейджа
+        # Стили подбираем для компактности и выравнивания
+        badge_html = f"""<span style="
+            background-color: {status_color};
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: bold;
+            margin-right: 4px;
+            display: inline-block;
+            vertical-align: middle;
+            line-height: 1.2;
+        ">{status_text}</span>"""
+        
+        button_label_text = f"№{card_order}: ID {card_id} - Риск: {risk:.2f} - {card_type}"
+        # Всплывающая подсказка для кнопки может теперь содержать и статус, если нужно, или только доп. инфо
+        button_help = f"Карточка №{card_order}, ID {card_id}, Статус: {status_text}"
+        key = f"gz_card_nav_{card_id}_{current_card_status}" # Добавим статус в ключ для уникальности при обновлении
+
+        # Используем колонки: одна для бейджа, другая для кнопки
+        # Соотношение ширин подбираем экспериментально для компактности
+        col_badge, col_button_text = st.columns([1, 10]) # Уменьшаем первую колонку относительно второй
+
+        with col_badge:
+            st.markdown(badge_html, unsafe_allow_html=True)
+        
+        with col_button_text:
+            if st.button(button_label_text, key=key, help=button_help):
+                if hasattr(st, 'navigate_to_app'):
+                    st.navigate_to_app("Карточки", card_id=str(card_id))
+                else:
+                    st.query_params.clear()
+                    st.query_params["page"] = "cards"
+                    st.query_params["card_id"] = str(card_id)
+                st.rerun()
+
+        # Специальные флаги (этот блок можно оставить или модифицировать)
         special_flags = []
         if card.get("trickiness_level", 0) > 0:
             level_text = trickiness_categories.get(int(card["trickiness_level"]), "")

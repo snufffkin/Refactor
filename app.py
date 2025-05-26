@@ -32,6 +32,10 @@ import navigation_utils
 MAX_WORKERS = min(multiprocessing.cpu_count(), 8)
 print(f"Using {MAX_WORKERS} worker threads for parallel operations")
 
+# Инициализация счетчика обновлений для инвалидации кэша (если где-то используется)
+if 'data_update_counter' not in st.session_state:
+    st.session_state.data_update_counter = 0
+
 # Настройка страницы
 st.set_page_config(
     "Course Quality Dashboard", 
@@ -610,7 +614,7 @@ def set_filters_from_params(params_arg):
 
 # Новая функция для параллельной загрузки данных
 @st.cache_data(ttl=3600)
-def load_app_data(_engine, current_page, program, module, lesson, gz):
+def load_app_data(_engine, current_page, program, module, lesson, gz, update_trigger=0):
     """
     Загружает данные в зависимости от текущей страницы с использованием материализованных представлений
     
@@ -700,6 +704,7 @@ def load_app_data(_engine, current_page, program, module, lesson, gz):
         result["card_page_data"] = core.load_card_data(program=program, module=module, lesson=lesson, gz=gz, _engine=_engine)
     else:
         # Используем params_for_load_all, которые содержат program, module, lesson, gz из аргументов
+        params_for_load_all["update_trigger"] = update_trigger
         result = core.load_all_data_for_level(**params_for_load_all)
     
     # Загружаем данные для навигации из cards_structure (для боковой панели и, возможно, для display_course_links)
@@ -1067,7 +1072,11 @@ PAGES = {
     "Программы": lambda data_dict: pages.page_programs(data_dict.get("modules")),
     "Модули": lambda data_dict: pages.page_modules(data_dict.get("lessons")),
     "Уроки": lambda data_dict: pages.page_lessons(data_dict.get("gz_list")),
-    "ГЗ": lambda data_dict: pages.page_gz(data_dict.get("cards"), create_internal_link),
+    "ГЗ": lambda data_dict: pages.page_gz(
+        df_cards_input=data_dict.get("cards"), 
+        eng=engine,  # Передаем engine
+        create_link_fn=create_internal_link
+    ),
     "Карточки": lambda data_dict: pages.page_cards(
         df_card_details=data_dict.get("card_page_data"), 
         df_structure=data_dict.get("navigation_data"), 

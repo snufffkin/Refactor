@@ -70,7 +70,6 @@ def display_card_details(card_data):
             "Модуль": card_data["module_name"],
             "Урок": card_data["lesson_name"],
             "Группа заданий": card_data["gz_name"],
-            "Статус": card_data["status"],
             "Текущий риск": f"{card_data['risk']:.3f}"
         }
         
@@ -838,28 +837,38 @@ def display_card_status_form(card_data, engine):
         "in_work": "Карточка в работе, проблемы анализируются",
         "ready_for_qc": "Карточка готова к проверке качества",
         "done": "Карточка проверена и одобрена",
-        "wont_fix": "Проблемы с карточкой не будут исправлены"
+        "wont_fix": "Проблемы с карточкой не будут исправлены",
+        "archive": "Карточка архивирована"
     }
     
     # Получаем текущий статус
-    current_status = card_data.get("status") # Используем .get() для большей безопасности
+    current_status_value = card_data.get("status") 
+    
+    if current_status_value is None or pd.isna(current_status_value):
+        display_status = "unknown"
+    else:
+        display_status = str(current_status_value)
 
     # Определяем индекс для selectbox
     status_keys = list(statuses.keys())
     current_status_index = 0 # Индекс по умолчанию (для 'new')
 
-    if current_status in status_keys:
-        current_status_index = status_keys.index(current_status)
+    if display_status in status_keys:
+        current_status_index = status_keys.index(display_status)
     else:
-        st.warning(f"Текущий статус карточки ('{current_status}') недействителен или отсутствует. Используется статус по умолчанию 'new'.")
-        # Если статус недействителен, устанавливаем current_status в 'new', чтобы форма работала корректно
-        current_status = "new" 
+        st.warning(f"Текущий статус карточки ('{display_status}') недействителен или отсутствует. Используется статус по умолчанию 'new'.")
+        # Если статус недействителен, устанавливаем display_status в 'new', чтобы форма работала корректно
+        display_status = "new" 
         if "new" in status_keys: # Убедимся, что 'new' есть в ключах
             current_status_index = status_keys.index("new")
         # Если 'new' по какой-то причине отсутствует, current_status_index останется 0, что безопасно
 
     # Создаем форму для обновления статуса
     with st.form(key="update_status_form"):
+        # Инициализация счетчика обновлений, если его нет
+        if 'data_update_counter' not in st.session_state:
+            st.session_state.data_update_counter = 0
+
         # Выбор нового статуса
         new_status = st.selectbox(
             "Статус карточки",
@@ -872,7 +881,7 @@ def display_card_status_form(card_data, engine):
         submit_button = st.form_submit_button(label="Обновить статус", type="primary")
         
         # Если кнопка нажата и статус изменился
-        if submit_button and new_status != current_status:
+        if submit_button and new_status != display_status:
             # Создаем оригинальный и отредактированный датафреймы для функции сохранения
             original_df = pd.DataFrame([card_data.to_dict()]).reset_index(drop=True)
             edited_df = original_df.copy()
@@ -916,7 +925,13 @@ def display_card_status_form(card_data, engine):
                             "status": new_status
                         })
                 
-                st.success(f"Статус карточки обновлен с '{current_status}' на '{new_status}'")
+                st.success(f"Статус карточки обновлен с '{display_status}' на '{new_status}'")
+
+                # Инкрементируем счетчик для инвалидации кэша
+                st.session_state.data_update_counter = st.session_state.get('data_update_counter', 0) + 1
+                print(f"Data update counter incremented to: {st.session_state.data_update_counter}") # Отладка
+                
+                st.rerun() 
             except Exception as e:
                 st.error(f"Ошибка при обновлении статуса: {str(e)}")
 
@@ -1052,8 +1067,41 @@ def page_cards(df_card_details: pd.DataFrame, df_structure: pd.DataFrame, eng):
         return
     
     # Получаем Series с данными карточки
-    card_data = card_data_rows.iloc[0]
+    card_data = card_data_rows.iloc[0].copy() # Используем .copy() чтобы избежать SettingWithCopyWarning
     
+    # Получаем СВЕЖИЙ СТАТУС для текущей карточки
+    current_card_id = int(card_data["card_id"])
+    df_fresh_status = core.get_fresh_card_statuses(eng, [current_card_id])
+    if not df_fresh_status.empty:
+        fresh_status_info = df_fresh_status.iloc[0]
+        card_data["status"] = fresh_status_info["status"]
+        card_data["updated_at"] = fresh_status_info["updated_at"] # Обновляем и дату обновления статуса
+        card_data["updated_by"] = fresh_status_info["updated_by"] # и кем обновлен
+        print(f"[page_cards] Fresh status for card {current_card_id}: {card_data['status']}")
+    else:
+        print(f"[page_cards] Could not fetch fresh status for card {current_card_id}. Using status from df_card_details.")
+
+    # --- ОТОБРАЖЕНИЕ СТАТУСА КАРТОЧКИ В САМОМ ВЕРХУ СТРАНИЦЫ (ДО ЗАГОЛОВКА) ---
+    current_status_value_for_badge = card_data.get("status") 
+    display_status_for_badge = "unknown"
+    if current_status_value_for_badge is not None and not pd.isna(current_status_value_for_badge):
+        display_status_for_badge = str(current_status_value_for_badge)
+    
+    # Карта цветов для бейджа (можно вынести, если используется еще где-то в таком же виде)
+    badge_status_color_map = {
+        "new": "blue", "in_work": "orange", "review": "purple", 
+        "ready_for_qc": "violet", "done": "green", "wont_fix": "red", "archive": "grey", "unknown": "grey"
+    }
+    badge_color = badge_status_color_map.get(display_status_for_badge, "grey")
+    
+    st.markdown(
+        f"<span style='display:inline-block; background-color:{badge_color}; color:white; padding:0.2em 0.7em; border-radius:0.7em; font-weight:bold; font-size:1em; margin-bottom:10px;'>"
+        f"{display_status_for_badge.capitalize()}</span>",
+        unsafe_allow_html=True
+    )
+    # st.markdown("<hr style='margin-top: 5px; margin-bottom: 10px;'>", unsafe_allow_html=True) # Горизонтальную линию можно убрать или оставить по желанию
+    # --- КОНЕЦ БЛОКА ОТОБРАЖЕНИЯ СТАТУСА ---
+
     # Добавляем метрику разницы между success_rate и first_try_success_rate
     card_data["success_diff"] = card_data["success_rate"] - card_data["first_try_success_rate"]
     
@@ -1071,7 +1119,7 @@ def page_cards(df_card_details: pd.DataFrame, df_structure: pd.DataFrame, eng):
         levels=["program", "module", "lesson", "gz", "card"],
         values=[card_data["program_name"], card_data["module_name"], card_data["lesson_name"], card_data["gz_name"], f"Карточка {int(card_data['card_id'])}"]
     )
-    
+
     # Отображаем ссылки на карточку и ГЗ
     add_card_links(card_data)
     

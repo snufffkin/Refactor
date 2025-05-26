@@ -28,13 +28,14 @@ def get_engine():
     return create_engine(dsn, future=True)
 
 @st.cache_data(ttl=3600)  # Кэширование на 1 час (3600 секунд)
-def load_raw_data(_engine):
+def load_raw_data(_engine, update_trigger=0):
     """
     Загружает сырые данные из базы данных.
     Функция кэшируется с большим TTL для оптимизации обращений к БД.
     
     Args:
         _engine: SQLAlchemy engine для подключения к БД (не хешируемый параметр)
+        update_trigger: Триггер для инвалидации кэша
         
     Returns:
         DataFrame с данными из таблицы cards_mv
@@ -857,7 +858,7 @@ def risk_score(row):
 # Добавляем функции для загрузки данных для конкретного уровня навигации
 
 @st.cache_data(ttl=1800)  # Кэширование на 30 минут
-def load_program_data(_engine=None):
+def load_program_data(_engine=None, update_trigger=0):
     """
     Загружает агрегированные данные на уровне программ.
     Использует материализованное представление mv_program_stats.
@@ -876,7 +877,7 @@ def load_program_data(_engine=None):
     return pd.read_sql(sql, _engine)
 
 @st.cache_data(ttl=1800)  # Кэширование на 30 минут
-def load_module_data(program=None, _engine=None):
+def load_module_data(program=None, _engine=None, update_trigger=0):
     """
     Загружает агрегированные данные на уровне модулей для указанной программы.
     Использует материализованное представление mv_module_stats.
@@ -900,7 +901,7 @@ def load_module_data(program=None, _engine=None):
     return pd.read_sql(text(query), _engine, params=params)
 
 @st.cache_data(ttl=1800)  # Кэширование на 30 минут
-def load_lesson_data(program=None, module=None, _engine=None):
+def load_lesson_data(program=None, module=None, _engine=None, update_trigger=0):
     """
     Загружает агрегированные данные на уровне уроков для указанной программы и модуля.
     Использует материализованное представление mv_lesson_stats.
@@ -933,7 +934,7 @@ def load_lesson_data(program=None, module=None, _engine=None):
     return pd.read_sql(text(query), _engine, params=params)
 
 @st.cache_data(ttl=1800)  # Кэширование на 30 минут
-def load_gz_data(program=None, module=None, lesson=None, _engine=None):
+def load_gz_data(program=None, module=None, lesson=None, _engine=None, update_trigger=0):
     """
     Загружает агрегированные данные на уровне групп заданий (ГЗ) для указанных параметров.
     Использует материализованное представление mv_gz_stats, соединенное с cards_structure для фильтрации.
@@ -984,7 +985,7 @@ def load_gz_data(program=None, module=None, lesson=None, _engine=None):
     return pd.read_sql(text(query), _engine, params=params)
 
 @st.cache_data(ttl=1800)  # Кэширование на 30 минут
-def load_card_data(program=None, module=None, lesson=None, gz=None, _engine=None):
+def load_card_data(program=None, module=None, lesson=None, gz=None, _engine=None, update_trigger=0):
     """
     Загружает данные карточек для указанных параметров фильтрации.
     """
@@ -1033,7 +1034,7 @@ def load_card_data(program=None, module=None, lesson=None, gz=None, _engine=None
     return pd.read_sql(text(query), _engine, params=params)
 
 @st.cache_data(ttl=1800)  # Кэширование на 30 минут
-def load_top_cards_by_risk(gz=None, limit=10, _engine=None):
+def load_top_cards_by_risk(gz=None, limit=10, _engine=None, update_trigger=0):
     """
     Загружает карточки с наивысшим риском для указанной группы заданий или для всех групп.
     """
@@ -1092,7 +1093,7 @@ def execute_in_parallel(functions_with_args, max_workers=4):
     return results
 
 @st.cache_data(ttl=1800)
-def load_data_parallel(program=None, module=None, lesson=None, gz=None, _engine=None, max_workers=4):
+def load_data_parallel(program=None, module=None, lesson=None, gz=None, _engine=None, max_workers=4, update_trigger=0):
     """
     Загружает несколько наборов данных параллельно в зависимости от уровня навигации.
     
@@ -1116,32 +1117,32 @@ def load_data_parallel(program=None, module=None, lesson=None, gz=None, _engine=
     if gz:
         # Уровень группы заданий - нужны карточки и топ карточки по риску
         functions_with_args = [
-            (load_card_data, {'program': program, 'module': module, 'lesson': lesson, 'gz': gz, '_engine': _engine}),
-            (load_top_cards_by_risk, {'gz': gz, '_engine': _engine})
+            (load_card_data, {'program': program, 'module': module, 'lesson': lesson, 'gz': gz, '_engine': _engine, 'update_trigger': update_trigger}),
+            (load_top_cards_by_risk, {'gz': gz, '_engine': _engine, 'update_trigger': update_trigger})
         ]
     elif lesson:
         # Уровень урока - нужны группы заданий и карточки
         functions_with_args = [
-            (load_gz_data, {'program': program, 'module': module, 'lesson': lesson, '_engine': _engine}),
-            (load_card_data, {'program': program, 'module': module, 'lesson': lesson, '_engine': _engine})
+            (load_gz_data, {'program': program, 'module': module, 'lesson': lesson, '_engine': _engine, 'update_trigger': update_trigger}),
+            (load_card_data, {'program': program, 'module': module, 'lesson': lesson, '_engine': _engine, 'update_trigger': update_trigger})
         ]
     elif module:
         # Уровень модуля - нужны уроки
         functions_with_args = [
-            (load_lesson_data, {'program': program, 'module': module, '_engine': _engine}),
-            (load_gz_data, {'program': program, 'module': module, '_engine': _engine})
+            (load_lesson_data, {'program': program, 'module': module, '_engine': _engine, 'update_trigger': update_trigger}),
+            (load_gz_data, {'program': program, 'module': module, '_engine': _engine, 'update_trigger': update_trigger})
         ]
     elif program:
         # Уровень программы - нужны модули
         functions_with_args = [
-            (load_module_data, {'program': program, '_engine': _engine}),
-            (load_lesson_data, {'program': program, '_engine': _engine})
+            (load_module_data, {'program': program, '_engine': _engine, 'update_trigger': update_trigger}),
+            (load_lesson_data, {'program': program, '_engine': _engine, 'update_trigger': update_trigger})
         ]
     else:
         # Обзорный уровень - нужны программы и модули
         functions_with_args = [
-            (load_program_data, {'_engine': _engine}),
-            (load_module_data, {'_engine': _engine})
+            (load_program_data, {'_engine': _engine, 'update_trigger': update_trigger}),
+            (load_module_data, {'_engine': _engine, 'update_trigger': update_trigger})
         ]
     
     # Выполняем функции параллельно
@@ -1150,7 +1151,7 @@ def load_data_parallel(program=None, module=None, lesson=None, gz=None, _engine=
 # ------------------ Объединенная функция загрузки данных --------------------- #
 
 @st.cache_data(ttl=3600)
-def load_all_data_for_level(level="overview", program=None, module=None, lesson=None, gz=None, _engine=None, max_workers=4):
+def load_all_data_for_level(level="overview", program=None, module=None, lesson=None, gz=None, _engine=None, max_workers=4, update_trigger=0):
     """
     Загружает все необходимые данные для указанного уровня навигации, используя параллельную загрузку.
     
@@ -1173,42 +1174,52 @@ def load_all_data_for_level(level="overview", program=None, module=None, lesson=
     
     # Загружаем базовые данные для уровня
     if level == "overview":
-        parallel_data = load_data_parallel(_engine=_engine, max_workers=max_workers)
+        parallel_data = load_data_parallel(_engine=_engine, max_workers=max_workers, update_trigger=update_trigger)
         result["programs"] = parallel_data.get("load_program_data", pd.DataFrame())
         result["modules"] = parallel_data.get("load_module_data", pd.DataFrame())
     
     elif level == "program" and program:
-        parallel_data = load_data_parallel(program=program, _engine=_engine, max_workers=max_workers)
+        parallel_data = load_data_parallel(program=program, _engine=_engine, max_workers=max_workers, update_trigger=update_trigger)
         result["modules"] = parallel_data.get("load_module_data", pd.DataFrame())
         result["lessons"] = parallel_data.get("load_lesson_data", pd.DataFrame())
-        result["program_data"] = load_program_data(_engine=_engine)
+        result["program_data"] = load_program_data(_engine=_engine, update_trigger=update_trigger)
         result["program_data"] = result["program_data"][result["program_data"]["program_name"] == program]
     
     elif level == "module" and module:
-        parallel_data = load_data_parallel(program=program, module=module, _engine=_engine, max_workers=max_workers)
+        parallel_data = load_data_parallel(program=program, module=module, _engine=_engine, max_workers=max_workers, update_trigger=update_trigger)
         result["lessons"] = parallel_data.get("load_lesson_data", pd.DataFrame())
         result["gz_list"] = parallel_data.get("load_gz_data", pd.DataFrame())
-        result["module_data"] = load_module_data(program=program, _engine=_engine)
+        result["module_data"] = load_module_data(program=program, _engine=_engine, update_trigger=update_trigger)
         result["module_data"] = result["module_data"][result["module_data"]["module_name"] == module]
     
     elif level == "lesson" and lesson:
-        parallel_data = load_data_parallel(program=program, module=module, lesson=lesson, _engine=_engine, max_workers=max_workers)
+        parallel_data = load_data_parallel(program=program, module=module, lesson=lesson, _engine=_engine, max_workers=max_workers, update_trigger=update_trigger)
         result["gz_list"] = parallel_data.get("load_gz_data", pd.DataFrame())
         result["cards"] = parallel_data.get("load_card_data", pd.DataFrame())
-        result["lesson_data"] = load_lesson_data(program=program, module=module, _engine=_engine)
+        result["lesson_data"] = load_lesson_data(program=program, module=module, _engine=_engine, update_trigger=update_trigger)
         result["lesson_data"] = result["lesson_data"][result["lesson_data"]["lesson_name"] == lesson]
     
     elif level == "gz" and gz:
-        parallel_data = load_data_parallel(program=program, module=module, lesson=lesson, gz=gz, _engine=_engine, max_workers=max_workers)
+        parallel_data = load_data_parallel(program=program, module=module, lesson=lesson, gz=gz, _engine=_engine, max_workers=max_workers, update_trigger=update_trigger)
         result["cards"] = parallel_data.get("load_card_data", pd.DataFrame())
         result["top_cards"] = parallel_data.get("load_top_cards_by_risk", pd.DataFrame())
-        result["gz_data"] = load_gz_data(program=program, module=module, lesson=lesson, _engine=_engine)
+        result["gz_data"] = load_gz_data(program=program, module=module, lesson=lesson, _engine=_engine, update_trigger=update_trigger)
         result["gz_data"] = result["gz_data"][result["gz_data"]["gz_name"] == gz]
     
-    elif level == "card" and "card_id" in result:
-        card_id = result["card_id"]
-        result["card_data"] = load_card_data(program=program, module=module, lesson=lesson, gz=gz, _engine=_engine)
-        result["card_data"] = result["card_data"][result["card_data"]["card_id"] == card_id]
+    elif level == "card" and "card_id" in st.session_state: # Проверяем st.session_state для card_id
+        card_id_for_load = st.session_state["card_id"] # Используем card_id из session_state
+        # Загружаем данные для конкретной карточки, передавая update_trigger
+        # Здесь нет parallel_data, так как это специфичный вызов для одной карточки
+        card_data_df = load_card_data(program=program, module=module, lesson=lesson, gz=gz, _engine=_engine, update_trigger=update_trigger)
+        if not card_data_df.empty:
+            # Фильтруем по card_id. Убедимся, что card_id_for_load это число для сравнения
+            try:
+                card_id_int = int(card_id_for_load)
+                result["card_data"] = card_data_df[card_data_df["card_id"] == card_id_int]
+            except ValueError:
+                result["card_data"] = pd.DataFrame() # Если card_id невалидный, возвращаем пустой DataFrame
+        else:
+            result["card_data"] = pd.DataFrame()
     
     return result
 
@@ -1436,3 +1447,47 @@ def log_user_action(_engine, user_id: Optional[int], action_type: str, page_key:
         # В случае ошибки можно попробовать откатить транзакцию, если она была начата явно,
         # но здесь connect() управляет транзакцией.
         # Важно не прерывать основное выполнение приложения из-за ошибки логирования.
+
+# НОВАЯ ФУНКЦИЯ ДЛЯ ЗАГРУЗКИ СВЕЖИХ СТАТУСОВ БЕЗ КЭШИРОВАНИЯ
+def get_fresh_card_statuses(_engine, card_ids: list) -> pd.DataFrame:
+    """
+    Загружает актуальные статусы для указанного списка card_id из таблицы card_status.
+    Эта функция НЕ кэшируется, чтобы всегда получать свежие данные.
+    """
+    print(f"[DEBUG get_fresh_card_statuses] Received card_ids: {card_ids}") # ОТЛАДКА
+    if not card_ids:
+        print("[DEBUG get_fresh_card_statuses] Empty initial card_ids list.") # ОТЛАДКА
+        return pd.DataFrame(columns=['card_id', 'status', 'updated_at', 'updated_by'])
+
+    try:
+        valid_card_ids = [c_id for c_id in card_ids if c_id is not None and not pd.isna(c_id)]
+        if not valid_card_ids:
+            print("[DEBUG get_fresh_card_statuses] No valid_card_ids after filtering None/NaN.")
+            return pd.DataFrame(columns=['card_id', 'status', 'updated_at', 'updated_by'])
+        processed_card_ids = list(set(map(int, valid_card_ids)))
+        if not processed_card_ids: 
+            print("[DEBUG get_fresh_card_statuses] No processed_card_ids after set(map(int,...)).")
+            return pd.DataFrame(columns=['card_id', 'status', 'updated_at', 'updated_by'])
+    except (ValueError, TypeError) as e:
+        print(f"[DEBUG get_fresh_card_statuses] Error processing card_ids: {card_ids}. Error: {e}.")
+        return pd.DataFrame(columns=['card_id', 'status', 'updated_at', 'updated_by'])
+
+    print(f"[DEBUG get_fresh_card_statuses] Processed card_ids for SQL: {processed_card_ids}")
+
+    placeholders = ",".join([f":card_id_{i}" for i in range(len(processed_card_ids))])
+    # Формируем строку запроса для лога перед созданием объекта text()
+    sql_query_str = f"SELECT card_id, status, updated_at, updated_by FROM card_status WHERE card_id IN ({placeholders if processed_card_ids else 'NULL'})"
+    sql_query = text(sql_query_str) # sql_query_str используется только для лога, в text() передаем корректный плейсхолдер
+    
+    params = {f"card_id_{i}": c_id for i, c_id in enumerate(processed_card_ids)}
+    print(f"[DEBUG get_fresh_card_statuses] Executing SQL: {sql_query_str} with params: {params}")
+    
+    try:
+        df_statuses = pd.read_sql(sql_query, _engine, params=params)
+        print(f"[DEBUG get_fresh_card_statuses] Fetched statuses DataFrame shape: {df_statuses.shape}")
+        if not df_statuses.empty:
+            print(f"[DEBUG get_fresh_card_statuses] Fetched data sample:\n{df_statuses.head()}")
+        return df_statuses
+    except Exception as e:
+        print(f"[DEBUG get_fresh_card_statuses] Error fetching fresh card statuses: {e}")
+        return pd.DataFrame(columns=['card_id', 'status', 'updated_at', 'updated_by'])

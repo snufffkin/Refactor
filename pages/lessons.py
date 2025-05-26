@@ -9,6 +9,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
 from sqlalchemy.sql import text
+from sqlalchemy.orm import sessionmaker
 
 import core
 from components.utils import create_hierarchical_header, display_clickable_items
@@ -525,6 +526,134 @@ def page_lessons(df: pd.DataFrame):
             with col2:
                 st.subheader("Как усложнить")
                 display_reviews_in_subcols(row["complexity_to_complicate"], is_positive=True)
+
+    st.subheader("🛠️ Управление статусами карточек урока")
+
+    # Возможные статусы для карточек
+    # TODO: Получать эти статусы из базы данных или конфигурационного файла, если они могут меняться
+    POSSIBLE_CARD_STATUSES = ["new", "in_work", "review", "done", "archive"]
+    
+    selected_status = st.selectbox(
+        "Выберите новый статус для ВСЕХ карточек этого урока:",
+        options=POSSIBLE_CARD_STATUSES,
+        index=0  # По умолчанию выбран первый статус
+    )
+
+    if st.button("Применить статус ко всем карточкам урока"):
+        if prog_name and module_name and lesson_name:
+            try:
+                engine = core.get_engine()
+                Session = sessionmaker(bind=engine)
+                session = Session()
+
+                # 1. Получить lesson_id
+                lesson_id_query = text("""
+                    SELECT lesson_id FROM lesson_ids
+                    WHERE program_name = :prog_name AND module_name = :module_name AND lesson_name = :lesson_name
+                """)
+                lesson_id_result = session.execute(lesson_id_query, {"prog_name": prog_name, "module_name": module_name, "lesson_name": lesson_name}).fetchone()
+
+                if lesson_id_result:
+                    current_lesson_id = lesson_id_result[0]
+
+                    # 2. Получить все card_id для этого lesson_id из cards_structure
+                    cards_query = text("""
+                        SELECT card_id FROM cards_structure
+                        WHERE lesson_id = :lesson_id
+                    """)
+                    cards_result = session.execute(cards_query, {"lesson_id": current_lesson_id}).fetchall()
+                    
+                    card_ids_to_update = [row[0] for row in cards_result if row[0] is not None]
+
+                    if card_ids_to_update:
+                        # 3. Обновить статус для каждой карточки в card_status
+                        # Мы будем обновлять существующие записи или вставлять новые, если карточки нет в card_status
+                        
+                        # Сначала получим существующие card_id в card_status для этого урока
+                        existing_card_ids_in_status_table_query = text("""
+                            SELECT cs.card_id 
+                            FROM card_status cs
+                            JOIN cards_structure cstruct ON cs.card_id = cstruct.card_id
+                            WHERE cstruct.lesson_id = :lesson_id
+                        """)
+                        existing_cards_in_status_table_result = session.execute(existing_card_ids_in_status_table_query, {"lesson_id": current_lesson_id}).fetchall()
+                        existing_card_ids_set = {row[0] for row in existing_cards_in_status_table_result}
+
+                        cards_to_update_in_status = []
+                        cards_to_insert_in_status = []
+
+                        for card_id in card_ids_to_update:
+                            if card_id in existing_card_ids_set:
+                                cards_to_update_in_status.append(card_id)
+                            else:
+                                cards_to_insert_in_status.append(card_id)
+                        
+                        current_user_for_db = st.session_state.get("username", "system_bulk_update") 
+                        st.info(f"[DEBUG lessons.py] Используется username для updated_by: {current_user_for_db}") # Отладочный вывод
+                        print(f"[DEBUG lessons.py] Используется username для updated_by: {current_user_for_db}") # Отладочный вывод в консоль
+                        
+                        if cards_to_update_in_status:
+                            update_stmt = text("""
+                                UPDATE card_status
+                                SET status = :new_status, updated_by = :user, updated_at = NOW()
+                                WHERE card_id = ANY(:card_ids)
+                            """)
+                            session.execute(update_stmt, {"new_status": selected_status, "user": current_user_for_db, "card_ids": cards_to_update_in_status})
+                        
+                        if cards_to_insert_in_status:
+                            # Для вставки нужно подготовить список словарей
+                            insert_data = [
+                                {
+                                    "card_id": c_id, 
+                                    "status": selected_status, 
+                                    "updated_by": current_user_for_db, 
+                                    "updated_at": pd.Timestamp.now(tz='UTC').strftime('%Y-%m-%d %H:%M:%S%z') 
+                                } for c_id in cards_to_insert_in_status
+                            ]
+                            # Предполагается, что таблица card_status существует и имеет столбцы card_id, status, updated_by, updated_at
+                            # Используем более явную вставку. `text()` не очень хорошо работает с `execute_many` или аналогами в SQLAlchemy Core без ORM моделей.
+                            # Будем вставлять по одной записи, если их немного, или подготовим батч инсерт если их много.
+                            # Для простоты примера пока что вставляем по одной, хотя это не оптимально для большого количества.
+                            for data_item in insert_data:
+                                insert_stmt = text("""
+                                    INSERT INTO card_status (card_id, status, updated_by, updated_at)
+                                    VALUES (:card_id, :status, :updated_by, :updated_at)
+                                    ON CONFLICT (card_id) DO UPDATE 
+                                    SET status = EXCLUDED.status, 
+                                        updated_by = EXCLUDED.updated_by, 
+                                        updated_at = EXCLUDED.updated_at;
+                                """)
+                                session.execute(insert_stmt, data_item)
+                                
+                        session.commit()
+                        st.success(f"Статус '{selected_status}' успешно применен к {len(card_ids_to_update)} карточкам урока.")
+
+                        # Очистка кэша перед rerun
+                        if hasattr(core, 'load_raw_data'):
+                            core.load_raw_data.clear()
+                        if hasattr(core, 'process_data'):
+                            core.process_data.clear()
+                        if hasattr(core, 'load_card_data'):
+                            core.load_card_data.clear()
+                        if hasattr(core, 'load_gz_data'): # Данные для ГЗ также могут зависеть от статусов карточек
+                            core.load_gz_data.clear()
+                        if hasattr(core, 'load_all_data_for_level'):
+                            core.load_all_data_for_level.clear()
+
+                        st.rerun() # Добавляем rerun для обновления интерфейса
+                    else:
+                        st.info("В этом уроке нет карточек для обновления.")
+                else:
+                    st.error(f"Не удалось найти ID для урока: {lesson_name}")
+                
+                session.close()
+            except Exception as e:
+                st.error(f"Ошибка при обновлении статусов карточек: {e}")
+                if 'session' in locals() and session.is_active:
+                    session.rollback()
+                    session.close()
+        else:
+            st.warning("Необходимо выбрать программу, модуль и урок для применения статуса.")
 
 # Встроенная версия страницы уроков для использования в других страницах
 def _page_lessons_inline(df: pd.DataFrame):
