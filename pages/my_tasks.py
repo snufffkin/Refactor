@@ -109,5 +109,8 @@ def page_my_tasks(df: pd.DataFrame, engine):
             card_id = int(row['card_id'])
             if st.button(f"Перейти к карточке {card_id}", key=f"my_tasks_nav_{card_id}"):
                 # Устанавливаем параметры URL и перезапускаем приложение
-                st.query_params = {"page": "cards", "card_id": str(card_id)}
+                # st.query_params = {"page": "cards", "card_id": str(card_id)} # Старый вариант возврата
+                st.query_params.clear()
+                st.query_params["page"] = "cards"
+                st.query_params["card_id"] = str(card_id)
                 st.rerun()

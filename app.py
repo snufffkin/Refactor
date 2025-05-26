@@ -6,9 +6,9 @@
 """
 
 # ---------------- IMPORTS ------------------------------------------------------- #
-
+import streamlit as st 
+import uuid 
 import urllib.parse as ul
-import streamlit as st
 import os
 import shutil
 import pandas as pd
@@ -17,6 +17,11 @@ import multiprocessing
 from typing import Dict, List, Optional, Union
 from sqlalchemy import text
 import json
+
+# Инициализация SESSION_ID после импортов
+if '_session_id' not in st.session_state:
+    st.session_state._session_id = str(uuid.uuid4())
+SESSION_ID = st.session_state._session_id
 
 auth.init_auth()
 
@@ -30,7 +35,7 @@ import navigation_utils
 # Определяем оптимальное количество потоков для системы
 # Используем максимальное доступное количество CPU или 8, что меньше
 MAX_WORKERS = min(multiprocessing.cpu_count(), 8)
-print(f"Using {MAX_WORKERS} worker threads for parallel operations")
+print(f"[{SESSION_ID}] Using {MAX_WORKERS} worker threads for parallel operations")
 
 # Инициализация счетчика обновлений для инвалидации кэша (если где-то используется)
 if 'data_update_counter' not in st.session_state:
@@ -239,19 +244,19 @@ st.markdown("""
 
 # ---------------- FUNCTIONS ------------------------------------------------------- #
 
-print(f"[APP START] query_params: {st.query_params}, session_state.current_page: {st.session_state.get('current_page')}")
+print(f"[{SESSION_ID}] APP START query_params: {st.query_params}, session_state.current_page: {st.session_state.get('current_page')}")
 
 # Функция для навигации между страницами без перезагрузки
-def navigate_to(page, update_url=True, **params):
+def navigate_to(page, update_url=True, **params_to_set):
     """
     Изменяет текущую страницу без полной перезагрузки приложения.
     
     Args:
         page: Название страницы для перехода
         update_url: Обновлять ли URL в адресной строке
-        **params: Дополнительные параметры (фильтры, card_id и т.д.)
+        **params_to_set: Дополнительные параметры (фильтры, card_id и т.д.)
     """
-    print(f"[NAVIGATE_TO] Called with page: '{page}', params: {params}")
+    print(f"[{SESSION_ID}] [NAVIGATE_TO] Called with page: '{page}', params: {params_to_set}")
 
     # 1. Определяем slug целевой страницы (всегда латиница, строчные)
     # page - это человекочитаемое имя ("Обзор", "Программы", "Модули" и т.д.)
@@ -267,7 +272,7 @@ def navigate_to(page, update_url=True, **params):
     elif page == "Панель администратора методистов": target_page_slug = "methodist_admin"
     elif page == "Планирование рефакторинга": target_page_slug = "refactor_planning"
     else:
-        print(f"[NAVIGATE_TO] Warning: Unknown page name '{page}' for slug generation. Defaulting to 'overview'.")
+        print(f"[{SESSION_ID}] [NAVIGATE_TO] Warning: Unknown page name '{page}' for slug generation. Defaulting to 'overview'.")
     
     # 2. Сброс дочерних фильтров в session_state на основе целевого slug
     level_to_reset_below = None # Это ключ из core.FILTERS (program, module, lesson, gz)
@@ -284,11 +289,11 @@ def navigate_to(page, update_url=True, **params):
     if level_to_reset_below:
         core.reset_child(level_to_reset_below)
 
-    # 3. Обновляем st.session_state.current_page (человекочитаемое имя) и фильтры на основе аргумента `page` и `params`
+    # 3. Обновляем st.session_state.current_page (человекочитаемое имя) и фильтры на основе аргумента `page` и `params_to_set`
     st.session_state.current_page = page 
     
-    if params:
-        for key, value in params.items():
+    if params_to_set:
+        for key, value in params_to_set.items():
             if key == "filter_program" or key == "program":
                 st.session_state.filter_program = value
             elif key == "filter_module" or key == "module":
@@ -307,11 +312,11 @@ def navigate_to(page, update_url=True, **params):
     # --- Логирование действия навигации (после обновления session_state) --- 
     try:
         current_user_id = st.session_state.get("user_id") # Получаем user_id
-        print(f"[NAVIGATE_TO LOGGING] Attempting to log. User ID: {current_user_id}") # <-- ПЕРВЫЙ DEBUG PRINT
+        print(f"[{SESSION_ID}] [NAVIGATE_TO LOGGING] Attempting to log. User ID: {current_user_id}") # <-- ПЕРВЫЙ DEBUG PRINT
 
         if current_user_id:
-            current_page_key_for_log = st.session_state.get("current_page", "Обзор").lower().replace(" ", "_")
-            prev_url_params_for_log = dict(st.query_params) 
+            current_page_key_for_log = st.session_state.get("current_page", "Начало").lower().replace(" ", "_")
+            prev_url_params_for_log = dict(st.query_params) # Читаем напрямую
             
             prog_name = st.session_state.get("filter_program")
             mod_name = st.session_state.get("filter_module")
@@ -343,10 +348,10 @@ def navigate_to(page, update_url=True, **params):
             if sel_assignment_id:
                 context_ids_for_log["assignment_id"] = sel_assignment_id
 
-            # Логируем переход НА НОВУЮ страницу `page` с параметрами `params`
+            # Логируем переход НА НОВУЮ страницу `page` с параметрами `params_to_set`
             # Для этого нам нужно определить display_name и context_ids для *целевой* страницы.
             # Пока что для простоты в поле display_name запишем имя целевой страницы `page`,
-            # а в url_params - передаваемые `params`.
+            # а в url_params - передаваемые `params_to_set`.
             # В будущем можно будет формировать более детальный display_name для целевой страницы.
             
             # ID текущего пользователя
@@ -357,12 +362,12 @@ def navigate_to(page, update_url=True, **params):
                 target_page_key = page.lower().replace(" ", "_")
                 
                 # Собираем параметры для целевой страницы, чтобы передать их в get_context_ids_by_names
-                target_prog_name = params.get("program", params.get("filter_program"))
-                target_mod_name = params.get("module", params.get("filter_module"))
-                target_les_name = params.get("lesson", params.get("filter_lesson"))
-                target_gz_name = params.get("gz", params.get("filter_gz"))
-                target_card_id = params.get("card_id")
-                target_assignment_id = params.get("assignment_id")
+                target_prog_name = params_to_set.get("program", params_to_set.get("filter_program"))
+                target_mod_name = params_to_set.get("module", params_to_set.get("filter_module"))
+                target_les_name = params_to_set.get("lesson", params_to_set.get("filter_lesson"))
+                target_gz_name = params_to_set.get("gz", params_to_set.get("filter_gz"))
+                target_card_id = params_to_set.get("card_id")
+                target_assignment_id = params_to_set.get("assignment_id")
 
                 target_context_ids = core.get_context_ids_by_names(
                     _engine=engine,
@@ -399,7 +404,7 @@ def navigate_to(page, update_url=True, **params):
                     target_display_name = page # Имя страницы по умолчанию, если нет других частей
 
                 # Параметры URL для логирования - это те, которые будут установлены для новой страницы
-                # Их нужно сформировать до вызова st.query_params = ...
+                # Их нужно сформировать до вызова st.query_params.clear()
                 future_url_params = {"page": target_page_key}
                 if target_prog_name: future_url_params["program"] = target_prog_name
                 if target_mod_name: future_url_params["module"] = target_mod_name
@@ -407,21 +412,19 @@ def navigate_to(page, update_url=True, **params):
                 if target_gz_name: future_url_params["gz"] = target_gz_name
                 if target_card_id: future_url_params["card_id"] = target_card_id
                 if target_assignment_id: future_url_params["assignment_id"] = target_assignment_id
-                # Также добавляем любые другие параметры из **params, не являющиеся стандартными фильтрами
-                for k_param, v_param in params.items():
-                    if k_param not in ["program", "filter_program", "module", "filter_module", 
-                                       "lesson", "filter_lesson", "gz", "filter_gz", 
-                                       "card_id", "assignment_id"] and k_param not in future_url_params:
-                        future_url_params[k_param] = v_param
+                # Добавить другие кастомные параметры из params_to_set, если они есть и должны быть в URL
+                for k, v in params_to_set.items():
+                    if k not in ["program", "module", "lesson", "gz", "card_id", "assignment_id"] and k not in future_url_params:
+                        future_url_params[k] = v
 
-                print("--- Logging Action Data (Inside if current_user_id) ---") # <-- ВТОРОЙ DEBUG PRINT
-                print(f"User ID (verified): {current_user_id}")
-                print(f"Action Type: navigate_page")
-                print(f"Target Page Key: {target_page_key}")
-                print(f"Target Context IDs: {target_context_ids}")
-                print(f"Target Display Name: {target_display_name}")
-                print(f"Future URL Params (to be logged): {future_url_params}")
-                print("--- End Logging Action Data ---")
+                print(f"[{SESSION_ID}] --- Logging Action Data (Inside if current_user_id) ---") # <-- ВТОРОЙ DEBUG PRINT
+                print(f"[{SESSION_ID}] User ID (verified): {current_user_id}")
+                print(f"[{SESSION_ID}] Action Type: navigate_page")
+                print(f"[{SESSION_ID}] Target Page Key: {target_page_key}")
+                print(f"[{SESSION_ID}] Target Context IDs: {target_context_ids}")
+                print(f"[{SESSION_ID}] Target Display Name: {target_display_name}")
+                print(f"[{SESSION_ID}] Future URL Params (to be logged): {future_url_params}")
+                print(f"[{SESSION_ID}] --- End Logging Action Data ---")
                 # --- КОНЕЦ ОТЛАДОЧНЫХ PRINT --- 
 
                 core.log_user_action(
@@ -434,64 +437,54 @@ def navigate_to(page, update_url=True, **params):
                     url_params=future_url_params # Параметры, которые БУДУТ установлены
                 )
             else:
-                print(f"[NAVIGATE_TO LOGGING] User ID is None or invalid. Skipping action logging.") # <-- ТРЕТИЙ DEBUG PRINT
+                print(f"[{SESSION_ID}] [NAVIGATE_TO LOGGING] User ID is None or invalid. Skipping action logging.") # <-- ТРЕТИЙ DEBUG PRINT
 
     except Exception as e:
-        print(f"[NAVIGATE_TO LOGGING] Error during action logging preparation: {e}") # <-- ЧЕТВЕРТЫЙ DEBUG PRINT
+        print(f"[{SESSION_ID}] [NAVIGATE_TO LOGGING] Error during action logging preparation: {e}") # <-- ЧЕТВЕРТЫЙ DEBUG PRINT
     # --- Конец логирования --- 
 
     # Очищаем кэш данных для целевой страницы, чтобы она загрузила свежие данные
-    # Формируем ключ на основе того, какими БУДУТ фильтры и current_page
+    # Формируем ключ на основе того, какими БУДУТ фильтры и current_page,
+    # а также user_id и selected_card_id текущей сессии.
     target_page_slug_for_cache = page.lower().replace(" ", "_") 
-    # Используем значения фильтров, которые только что установили в st.session_state из params
     prog_for_key = st.session_state.get("filter_program")
     mod_for_key = st.session_state.get("filter_module")
     les_for_key = st.session_state.get("filter_lesson")
     gz_for_key = st.session_state.get("filter_gz")
-    # current_page для data_key в load_app_data - это человекочитаемое имя
-    data_key_to_clear = f"data_cache_{page}_{prog_for_key}_{mod_for_key}_{les_for_key}_{gz_for_key}"
+    
+    # Важно: используем user_id и selected_card_id из текущей сессии для ключа очистки
+    current_user_id_for_clear_key = st.session_state.get("user_id", "guest")
+    selected_card_id_for_clear_key = st.session_state.get("selected_card_id", "none")
+    
+    data_key_to_clear = f"data_cache_{current_user_id_for_clear_key}_{selected_card_id_for_clear_key}_{page}_{prog_for_key}_{mod_for_key}_{les_for_key}_{gz_for_key}"
     if data_key_to_clear in st.session_state:
         del st.session_state[data_key_to_clear]
-        print(f"[NAVIGATE_TO] Cleared data cache key: {data_key_to_clear}")
+        print(f"[{SESSION_ID}] [NAVIGATE_TO] Cleared data cache key: {data_key_to_clear}")
 
     # Обновляем URL, если требуется
     if update_url:
-        url_params = {"page": target_page_slug} # Используем новый target_page_slug (латиница)
-        
-        # Берем значения фильтров из st.session_state, которые мы только что обновили
-        if st.session_state.get("filter_program"):
-            url_params["program"] = st.session_state.filter_program
-        if st.session_state.get("filter_module"):
-            url_params["module"] = st.session_state.filter_module
-        if st.session_state.get("filter_lesson"):
-            url_params["lesson"] = st.session_state.filter_lesson
-        if st.session_state.get("filter_gz"):
-            url_params["gz"] = st.session_state.filter_gz
-        if st.session_state.get("selected_card_id"):
-            url_params["card_id"] = st.session_state.selected_card_id
-        if st.session_state.get("selected_assignment_id"):
-            url_params["assignment_id"] = st.session_state.selected_assignment_id
-        
-        # Добавляем оставшиеся **params (не фильтры) в url_params, если их там еще нет
-        # Это те, что были переданы в navigate_to и не являются стандартными фильтрами
-        if params: # Проверяем, что params не пустой
-            for k, v in params.items():
-                # Ключи стандартных фильтров уже обработаны выше через st.session_state
-                # Проверяем, что ключ не является стандартным фильтром И его еще нет в url_params
-                if k not in ["program", "module", "lesson", "gz", "card_id", "assignment_id", 
-                              "filter_program", "filter_module", "filter_lesson", "filter_gz"] \
-                   and k not in url_params and v is not None:
-                    url_params[k] = v
+        # Формируем url_params для установки. target_page_slug уже определен.
+        # params_to_set - это **params, переданные в navigate_to
+        final_url_params = {"page": target_page_slug}
+        final_url_params.update(params_to_set) # Добавляем все переданные параметры
 
-        print(f"[NAVIGATE_TO] Setting st.query_params to: {url_params}") 
-        st.query_params = url_params
-        st.rerun() # ЯВНЫЙ RERUN
+        print(f"[{SESSION_ID}] [NAVIGATE_TO] For user_id: {st.session_state.get('user_id')}. Clearing and setting query_params to: {final_url_params}")
+        st.query_params.clear() # Очищаем старые
+        # st.query_params.from_dict(final_url_params) # Используем from_dict или присваивание
+        # Альтернатива: st.query_params = final_url_params (если from_dict не работает как ожидается или для большей ясности, что это полная замена)
+        # Согласно документации, присваивание st.query_params.key = value добавляет или обновляет. 
+        # Чтобы полностью заменить, лучше clear() + update() или from_dict()
+        # Попробуем clear() + цикл для большей надежности и явности
+        for key, value in final_url_params.items():
+            st.query_params[key] = value # Это должно правильно обработать строки и списки (для повторяющихся ключей)
+
+        st.rerun() 
 
 # Функция для возврата на предыдущую страницу
 def go_back():
     """Возвращает на предыдущую страницу из истории действий в БД"""
     current_user_id = st.session_state.get("user_id")
-    print(f"[GO_BACK] User ID: {current_user_id}")
+    print(f"[{SESSION_ID}] [GO_BACK] User ID: {current_user_id}")
     if not current_user_id:
         st.warning("Не удалось определить пользователя для возврата назад.")
         return False
@@ -509,36 +502,36 @@ def go_back():
             result = connection.execute(query_text, {"user_id": current_user_id}).fetchone()
             if result:
                 prev_page_action = result._asdict() 
-                print(f"[GO_BACK] Found previous action from DB: {prev_page_action}") # DEBUG
+                print(f"[{SESSION_ID}] [GO_BACK] Found previous action from DB: {prev_page_action}") # DEBUG
             else:
-                print("[GO_BACK] No previous action found in history (LIMIT 1 OFFSET 1 returned None).") # DEBUG
+                print(f"[{SESSION_ID}] [GO_BACK] No previous action found in history (LIMIT 1 OFFSET 1 returned None).") # DEBUG
                 st.warning("Нет предыдущей страницы в истории.")
                 return False
     except Exception as e:
-        st.error(f"[GO_BACK] Ошибка при загрузке истории для возврата: {e}") # DEBUG
+        st.error(f"[{SESSION_ID}] [GO_BACK] Ошибка при загрузке истории для возврата: {e}") # DEBUG
         return False
 
     if prev_page_action:
         entry_url_params_stored = prev_page_action.get("url_params")
         # page_key из БД может быть использован как fallback, если в url_params нет 'page'
         db_page_key = prev_page_action.get("page_key", "overview") 
-        print(f"[GO_BACK] DB page_key: {db_page_key}, Stored url_params: {entry_url_params_stored}") # DEBUG
+        print(f"[{SESSION_ID}] [GO_BACK] DB page_key: {db_page_key}, Stored url_params: {entry_url_params_stored}") # DEBUG
         
         entry_url_params = {}
         if isinstance(entry_url_params_stored, str):
             try:
                 entry_url_params = json.loads(entry_url_params_stored) 
             except Exception as e:
-                print(f"[GO_BACK] Error parsing url_params JSON: {e}. Using db_page_key as fallback.")
+                print(f"[{SESSION_ID}] [GO_BACK] Error parsing url_params JSON: {e}. Using db_page_key as fallback.")
                 entry_url_params = {"page": db_page_key} 
         elif isinstance(entry_url_params_stored, dict):
             entry_url_params = entry_url_params_stored
         else: 
-            print(f"[GO_BACK] url_params is not str or dict (type: {type(entry_url_params_stored)}). Using db_page_key as fallback.") # DEBUG
+            print(f"[{SESSION_ID}] [GO_BACK] url_params is not str or dict (type: {type(entry_url_params_stored)}). Using db_page_key as fallback.") # DEBUG
             entry_url_params = {"page": db_page_key}
 
         page_key_from_url_params = entry_url_params.get("page", db_page_key) # Приоритет 'page' из url_params
-        print(f"[GO_BACK] Page key to use for navigation (from url_params or db_page_key): {page_key_from_url_params}") # DEBUG
+        print(f"[{SESSION_ID}] [GO_BACK] Page key to use for navigation (from url_params or db_page_key): {page_key_from_url_params}") # DEBUG
         
         target_page_for_nav = "Обзор" 
         if page_key_from_url_params == "overview": target_page_for_nav = "Обзор"
@@ -555,7 +548,7 @@ def go_back():
 
         nav_params = {k: v for k, v in entry_url_params.items() if k != 'page'}
         
-        print(f"[GO_BACK] Navigating to page: '{target_page_for_nav}' with params: {nav_params}") # DEBUG
+        print(f"[{SESSION_ID}] [GO_BACK] Navigating to page: '{target_page_for_nav}' with params: {nav_params}") # DEBUG
         navigate_to(target_page_for_nav, **nav_params)
         return True
     return False
@@ -563,11 +556,9 @@ def go_back():
 # Функция для установки фильтров из URL-параметров
 def set_filters_from_params(params_arg):
     """Устанавливает фильтры на основе параметров URL"""
-    print(f"[set_filters_from_params] Полученные параметры: {params_arg}")
-    # Проходим по всем возможным фильтрам
-    # ВАЖНО: core.FILTERS определяет ключи, которые мы ищем в params_arg
-    # Убедимся, что core.FILTERS = ["program", "module", "lesson", "gz"]
-    # или что мы правильно обрабатываем ключи params_arg
+    current_user_for_log = st.session_state.get('user_id', 'UNKNOWN_USER') 
+    print(f"[{SESSION_ID}] [set_filters_from_params] For user_id: {current_user_for_log}. Полученные параметры: {params_arg}")
+    
     filter_keys_from_url = {
         "program": "filter_program",
         "module": "filter_module",
@@ -576,45 +567,52 @@ def set_filters_from_params(params_arg):
     }
 
     for url_key, session_key in filter_keys_from_url.items():
-        if url_key in params_arg:
-            param_value = params_arg[url_key]
-            # Если значение - это список, берем первый элемент (streamlit может так делать)
-            if isinstance(param_value, list):
-                param_value = param_value[0] if param_value else None 
+        if url_key in params_arg: 
+            param_value = params_arg.get(url_key) 
+            print(f"[{SESSION_ID}] DEBUG_QUERY_PARAMS: url_key='{url_key}', raw_param_value='{param_value}', type={type(param_value)}") # Отладочный print
             
-            if param_value is not None:
-                st.session_state[session_key] = param_value
-                print(f"[set_filters_from_params] Установлен {session_key} = {param_value}")
-            elif session_key in st.session_state: # Если параметр пришел пустым, но был в session_state, удаляем
-                del st.session_state[session_key]
-                print(f"[set_filters_from_params] Удален {session_key} из session_state, так как параметр в URL пуст")
+            # Попытка явно обработать как строку, если это поможет (хотя не должно быть нужно)
+            if isinstance(param_value, str):
+                actual_value_to_set = param_value
+            elif isinstance(param_value, list) and param_value: # На случай, если st.query_params иногда возвращает список
+                actual_value_to_set = str(param_value[0])
+            elif param_value is not None:
+                actual_value_to_set = str(param_value)
+            else:
+                actual_value_to_set = None
+            
+            print(f"[{SESSION_ID}] DEBUG_QUERY_PARAMS: url_key='{url_key}', actual_value_to_set='{actual_value_to_set}'")
 
-    # Обрабатываем дополнительные параметры из URL
+            if actual_value_to_set is not None:
+                st.session_state[session_key] = actual_value_to_set
+                print(f"[{SESSION_ID}] [set_filters_from_params] Установлен {session_key} = {actual_value_to_set} для user_id: {current_user_for_log}")
+            elif session_key in st.session_state: 
+                del st.session_state[session_key]
+                print(f"[{SESSION_ID}] [set_filters_from_params] Удален {session_key} из session_state для user_id: {current_user_for_log}, так как параметр в URL пуст")
+
     if "card_id" in params_arg:
-        card_id_val = params_arg["card_id"]
-        if isinstance(card_id_val, list):
-            card_id_val = card_id_val[0] if card_id_val else None
+        card_id_val_list = params_arg["card_id"]
+        card_id_val = card_id_val_list[0] if card_id_val_list else None
         if card_id_val is not None:
             st.session_state.selected_card_id = card_id_val
-            print(f"[set_filters_from_params] Установлен selected_card_id = {card_id_val}")
+            print(f"[{SESSION_ID}] [set_filters_from_params] Установлен selected_card_id = {card_id_val} для user_id: {current_user_for_log}")
         elif "selected_card_id" in st.session_state:
             del st.session_state.selected_card_id
 
     if "assignment_id" in params_arg:
-        assignment_id_val = params_arg["assignment_id"]
-        if isinstance(assignment_id_val, list):
-            assignment_id_val = assignment_id_val[0] if assignment_id_val else None
+        assignment_id_val_list = params_arg["assignment_id"]
+        assignment_id_val = assignment_id_val_list[0] if assignment_id_val_list else None
         if assignment_id_val is not None:
             st.session_state.selected_assignment_id = assignment_id_val
-            print(f"[set_filters_from_params] Установлен selected_assignment_id = {assignment_id_val}")
+            print(f"[{SESSION_ID}] [set_filters_from_params] Установлен selected_assignment_id = {assignment_id_val} для user_id: {current_user_for_log}")
         elif "selected_assignment_id" in st.session_state:
             del st.session_state.selected_assignment_id
     
-    print(f"[set_filters_from_params] После установки: filter_program = {st.session_state.get('filter_program')}")
+    print(f"[{SESSION_ID}] [set_filters_from_params] После установки для user_id: {current_user_for_log}: filter_program = {st.session_state.get('filter_program')}")
 
 # Новая функция для параллельной загрузки данных
 @st.cache_data(ttl=3600)
-def load_app_data(_engine, current_page, program, module, lesson, gz, update_trigger=0):
+def load_app_data(_engine, current_page, program, module, lesson, gz, user_id, selected_card_id=None, update_trigger=0):
     """
     Загружает данные в зависимости от текущей страницы с использованием материализованных представлений
     
@@ -625,6 +623,8 @@ def load_app_data(_engine, current_page, program, module, lesson, gz, update_tri
         module: Текущий фильтр по модулю
         lesson: Текущий фильтр по уроку
         gz: Текущий фильтр по ГЗ
+        user_id: ID текущего пользователя
+        selected_card_id: ID выбранной карточки (опционально)
         
     Returns:
         dict: Словарь с разными наборами данных для текущей страницы
@@ -642,9 +642,9 @@ def load_app_data(_engine, current_page, program, module, lesson, gz, update_tri
     level = level_mapping.get(current_page, "overview")
     
     # Параметры фильтрации теперь приходят как аргументы функции.
-    # card_id все еще получаем из session_state, так как он специфичен для страницы карточки
-    # и не должен влиять на кэш load_app_data на уровне фильтров программы/модуля и т.д.
-    card_id = st.session_state.get("selected_card_id")
+    # card_id (selected_card_id) теперь также является аргументом функции.
+    # Это обеспечивает его включение в ключ кэша.
+    # card_id = st.session_state.get("selected_card_id") # СТАРАЯ СТРОКА, УДАЛЯЕМ
     
     # Создаем словарь с параметрами для передачи в load_all_data_for_level
     # Заметим, что program, module, lesson, gz здесь - это аргументы функции load_app_data
@@ -701,10 +701,16 @@ def load_app_data(_engine, current_page, program, module, lesson, gz, update_tri
                  result["gz_data"] = current_gz_data
     elif level == "card":
         # Используем 'program', 'module', 'lesson', 'gz' из аргументов функции
-        result["card_page_data"] = core.load_card_data(program=program, module=module, lesson=lesson, gz=gz, _engine=_engine)
+        # selected_card_id также должен быть передан в core.load_card_data, если он там используется
+        # или данные для карточки загружаются по-другому, используя selected_card_id
+        result["card_page_data"] = core.load_card_data(program=program, module=module, lesson=lesson, gz=gz, card_id=selected_card_id, _engine=_engine, update_trigger=update_trigger)
     else:
         # Используем params_for_load_all, которые содержат program, module, lesson, gz из аргументов
         params_for_load_all["update_trigger"] = update_trigger
+        # Добавляем selected_card_id и user_id в params_for_load_all для передачи в load_all_data_for_level
+        # selected_card_id передается как selected_card_id_arg
+        # user_id пока не используется в load_all_data_for_level, но если понадобится, механизм будет тот же.
+        params_for_load_all["selected_card_id_arg"] = selected_card_id
         result = core.load_all_data_for_level(**params_for_load_all)
     
     # Загружаем данные для навигации из cards_structure (для боковой панели и, возможно, для display_course_links)
@@ -717,7 +723,7 @@ def load_app_data(_engine, current_page, program, module, lesson, gz, update_tri
         
         # Добавляем данные о назначениях для страницы задач
         if current_page == "Мои задачи":
-            result["assignments"] = core.load_user_assignments(_engine, st.session_state.user_id)
+            result["assignments"] = core.load_user_specific_assignments(_engine, user_id, update_trigger=update_trigger)
         
         # Добавляем данные для панели администратора методистов
         if current_page == "Панель администратора методистов":
@@ -749,7 +755,7 @@ def create_internal_link(target_page, label, **params):
         # params - это словарь с фильтрами и другими параметрами (например, program="XYZ", module="ABC")
         nav_call_params = params.copy() # Копируем, чтобы не изменять оригинальный params, если он где-то еще нужен
 
-        print(f"[create_internal_link] Calling app.navigate_to with page: '{target_page}', params: {nav_call_params}")
+        print(f"[{SESSION_ID}] [create_internal_link] Calling app.navigate_to with page: '{target_page}', params: {nav_call_params}")
         navigate_to(target_page, **nav_call_params) # Вызываем navigate_to из app.py
         # st.rerun() здесь больше не нужен, так как navigate_to (через изменение st.query_params) вызовет rerun
 
@@ -774,8 +780,8 @@ def init_internal_navigation():
     # # navigation_utils.init_navigation_history()
     
     # # Добавляем текущие параметры URL в историю navigation_utils (старая, больше не нужна) - УДАЛЕНО
-    # # if st.query_params:
-    # #     navigation_utils.add_to_history(st.query_params)
+    # # if st.experimental_get_query_params():
+    # #     navigation_utils.add_to_history(st.experimental_get_query_params())
     # # else:
     # #     navigation_utils.add_to_history({"page": "overview"})
 
@@ -788,23 +794,23 @@ if not auth.check_authentication():
     st.stop()
 
 # ---------------------- Обработка URL-параметров ---------------------- #
-params = st.query_params
-print(f"[app.py] В начале после rerun: st.query_params = {params}")
+params = st.query_params # Читаем напрямую
+print(f"[{SESSION_ID}] В начале после rerun: query_params = {params}")
 
 # Инициализация системы навигации
 init_internal_navigation()
 
 # Устанавливаем текущую страницу из URL или из session_state
-page_from_url = params.get("page", None) # Это должен быть slug латиницей
+page_from_url = params.get("page") # .get() вернет None если ключа нет, или значение (строку)
 current_page_determined = "Обзор" 
 
 if page_from_url:
-    print(f"[APP URL PARSE] page_from_url: '{page_from_url}'") 
+    print(f"[{SESSION_ID}] [APP URL PARSE] page_from_url: '{page_from_url}'") 
     if page_from_url == "overview":
         current_page_determined = "Обзор"
     elif page_from_url == "programs":
         current_page_determined = "Программы"
-    elif page_from_url == "modules": # СРАВНИВАЕМ С ЛАТИНИЦЕЙ
+    elif page_from_url == "modules": 
         current_page_determined = "Модули"
     elif page_from_url == "lessons":
         current_page_determined = "Уроки"
@@ -821,16 +827,14 @@ if page_from_url:
     elif page_from_url == "refactor_planning":
         current_page_determined = "Планирование рефакторинга"
     else:
-        print(f"[APP URL PARSE] Unknown page_from_url: '{page_from_url}', defaulting to Обзор.") 
+        print(f"[{SESSION_ID}] [APP URL PARSE] Unknown page_from_url: '{page_from_url}', defaulting to Обзор.") 
         current_page_determined = "Обзор" 
     
     st.session_state.current_page = current_page_determined
-    print(f"[APP URL PARSE] current_page set to: '{st.session_state.current_page}' from URL.") # DEBUG
+    print(f"[{SESSION_ID}] [APP URL PARSE] current_page set to: '{st.session_state.current_page}' from URL.") 
 else:
-    # Используем страницу из session_state или по умолчанию "Обзор"
-    # Это может произойти при первом запуске или если URL не содержит ?page=
     st.session_state.current_page = st.session_state.get("current_page", "Обзор")
-    print(f"[APP URL PARSE] current_page set to: '{st.session_state.current_page}' from session_state (no page in URL).") # DEBUG
+    print(f"[{SESSION_ID}] [APP URL PARSE] current_page set to: '{st.session_state.current_page}' from session_state (no page in URL).") 
 
 # Инициализация пользовательских данных после успешной аутентификации
 if "user_data" not in st.session_state and "user_id" in st.session_state:
@@ -856,50 +860,98 @@ module_filter = st.session_state.get("filter_module")
 lesson_filter = st.session_state.get("filter_lesson")
 gz_filter = st.session_state.get("filter_gz")
 
-# Обработка параметра card_id для страницы карточки
-if "card_id" in params and current_page_determined == "Карточки":
-    card_id = params["card_id"]
-    st.session_state["selected_card_id"] = card_id
-    
-# Проверяем, есть ли у нас кэшированные данные для этой страницы и текущих фильтров
-# Формируем data_key с учетом фильтров
-data_key = f"data_cache_{current_page_determined}_{program_filter}_{module_filter}_{lesson_filter}_{gz_filter}"
+# Обработка параметра card_id из URL для selected_card_id в session_state
+# Это важно сделать до формирования data_key, если selected_card_id влияет на data_key
+url_card_id_from_params = params.get("card_id") # params - это st.query_params, .get() вернет значение или None
+
+if url_card_id_from_params:
+    st.session_state["selected_card_id"] = str(url_card_id_from_params) # Сохраняем как строку
+    print(f"[{SESSION_ID}] Updated st.session_state.selected_card_id from URL params to: {st.session_state.selected_card_id}")
+    # Если card_id пришел в URL, а current_page не "Карточки", 
+    # возможно, стоит принудительно установить current_page_determined = "Карточки",
+    # но пока оставим как есть, navigate_to должна это обработать.
+else:
+    # Если card_id нет в URL, но он мог быть установлен в session_state ранее (например, при выборе из списка на стр. Карточки)
+    # и мы НЕ на странице карточки, то его, возможно, стоит сбросить, чтобы он не влиял на data_key других страниц.
+    # Однако, если мы на странице карточки, но card_id пропал из URL, мы все равно должны пытаться использовать тот, что в session_state.
+    # Эта логика может потребовать уточнения в зависимости от желаемого поведения.
+    # Пока что, если card_id нет в URL, selected_card_id в session_state останется как есть или будет None/"none".
+    pass 
+
+# Формируем data_key с учетом фильтров, user_id и selected_card_id
+current_user_id_for_key = st.session_state.get("user_id", "guest")
+selected_card_id_for_key = st.session_state.get("selected_card_id", "none") 
+print(f"[{SESSION_ID}] For data_key generation: current_page_determined='{current_page_determined}', selected_card_id_for_key='{selected_card_id_for_key}'")
+
+program_filter_for_key = st.session_state.get("filter_program") # Берем актуальные фильтры из session_state
+module_filter_for_key = st.session_state.get("filter_module")
+lesson_filter_for_key = st.session_state.get("filter_lesson")
+gz_filter_for_key = st.session_state.get("filter_gz")
+
+data_key = f"data_cache_{current_user_id_for_key}_{selected_card_id_for_key}_{current_page_determined}_{program_filter_for_key}_{module_filter_for_key}_{lesson_filter_for_key}_{gz_filter_for_key}"
 data_dict = st.session_state.get(data_key)
 
-# Если данных нет или они устарели, загружаем заново
 if data_dict is None:
-    data_dict = load_app_data(engine, current_page_determined, program_filter, module_filter, lesson_filter, gz_filter)
-    # Кэшируем данные в session_state
+    print(f"[{SESSION_ID}] Cache miss for data_key: {data_key}. Loading data...")
+    data_dict = load_app_data(
+        engine,
+        current_page_determined, 
+        program_filter_for_key, # Передаем актуальные фильтры
+        module_filter_for_key,
+        lesson_filter_for_key,
+        gz_filter_for_key,
+        current_user_id_for_key, 
+        selected_card_id_for_key 
+    )
     st.session_state[data_key] = data_dict
+else:
+    print(f"[{SESSION_ID}] Cache hit for data_key: {data_key}.")
 
-# Если это страница карточки, настраиваем фильтры на основе данных карточки
-if "card_id" in params and current_page_determined == "Карточки":
-    card_id = params["card_id"]
-    if "card_data" in data_dict and not data_dict["card_data"].empty:
-        card_data = data_dict["card_data"]
-        # Устанавливаем фильтры только если они еще не установлены
-        if "filter_program" not in st.session_state or not st.session_state["filter_program"]:
-            st.session_state["filter_program"] = card_data["program"].iloc[0]
-        if "filter_module" not in st.session_state or not st.session_state["filter_module"]:
-            st.session_state["filter_module"] = card_data["module"].iloc[0]
-        if "filter_lesson" not in st.session_state or not st.session_state["filter_lesson"]:
-            st.session_state["filter_lesson"] = card_data["lesson"].iloc[0]
-        if "filter_gz" not in st.session_state or not st.session_state["filter_gz"]:
-            st.session_state["filter_gz"] = card_data["gz"].iloc[0]
+# Если это страница карточки, настраиваем фильтры в session_state на основе фактических данных карточки
+# Это нужно делать ПОСЛЕ того, как data_dict загружен (либо из кэша, либо свежий)
+if current_page_determined == "Карточки" and selected_card_id_for_key != "none":
+    if "card_page_data" in data_dict and data_dict["card_page_data"] is not None and not data_dict["card_page_data"].empty:
+        card_data_df_for_filters = data_dict["card_page_data"]
+        try:
+            # core.load_card_data уже должна была отфильтровать по card_id, если он был передан,
+            # и вернуть одну строку или пустой DataFrame.
+            # Если selected_card_id_for_key не "none", значит, он был передан в load_card_data.
+            if not card_data_df_for_filters.empty:
+                # Предполагаем, что если card_page_data не пуст, то это данные нужной карточки
+                actual_card_data_row = card_data_df_for_filters.iloc[0]
+                
+                keys_to_update = {
+                    "filter_program": "program_name",
+                    "filter_module": "module_name",
+                    "filter_lesson": "lesson_name",
+                    "filter_gz": "gz_name"
+                }
+                updated_any_filter = False
+                for session_key, data_key_name in keys_to_update.items():
+                    if data_key_name in actual_card_data_row and pd.notna(actual_card_data_row[data_key_name]):
+                        # Обновляем фильтр в session_state только если он отличается или не установлен
+                        if st.session_state.get(session_key) != actual_card_data_row[data_key_name]:
+                            st.session_state[session_key] = actual_card_data_row[data_key_name]
+                            updated_any_filter = True
+                    elif session_key in st.session_state: # Если в данных карточки нет поля, а фильтр есть, удаляем
+                        del st.session_state[session_key]
+                        updated_any_filter = True # Считаем изменением для возможного rerun
+                
+                if updated_any_filter:
+                    print(f"[{SESSION_ID}] Filters in session_state (program, module, etc.) updated from actual card data for card_id: {selected_card_id_for_key}. Rerunning.")
+                    # Этот rerun важен, если сайдбар или хлебные крошки должны немедленно отразить новые фильтры
+                    st.rerun() 
+            else:
+                print(f"[{SESSION_ID}] Card data for card_id {selected_card_id_for_key} not found in card_page_data after load_card_data (it was empty). Error display handled by page_cards.")
+        except Exception as e_filter_update:
+            print(f"[{SESSION_ID}] Error updating filters from card data: {e_filter_update}")
+    else:
+        print(f"[{SESSION_ID}] 'card_page_data' is empty or not in data_dict for card_id: {selected_card_id_for_key}. Cannot update filters from card data.")
+        # Если card_page_data нет, страница карточки все равно покажет ошибку, что данные не загружены.
 
 # Добавляем функцию для использования истории из navigation_utils
 def use_navigation_utils_history():
     """Использует историю из модуля navigation_utils для навигации"""
-    # Выводим текущую историю для отладки
-    # history_size = navigation_utils.get_history_size()
-    # print(f"Размер истории navigation_utils: {history_size}")
-    # if history_size > 0:
-    #     # Вывод содержимого истории, если она не пуста
-    #     history = st.session_state.get("nav_history", [])
-    #     position = st.session_state.get("nav_history_position", -1)
-    #     print(f"Содержимое истории: {history}")
-    #     print(f"Текущая позиция: {position}")
-    
     if navigation_utils.navigate_back():
         # История навигации успешно использована
         return True
@@ -931,7 +983,6 @@ with col2:
     # Для полноценной работы "Вперед" с action_history нужна доп. логика.
     # Пока можно ее сделать неактивной или оставить как есть, если она не мешает.
     # Для простоты, пока оставим ее вызов, но он, скорее всего, не будет работать ожидаемо.
-    # Для простоты, пока оставим ее вызов, но он, скорее всего, не будет работать ожидаемо.
     if st.button("➡️", help="Вперед", key="btn_forward"):
         if navigation_utils.navigate_forward(): # Использует старую историю из navigation_utils
             st.rerun()
@@ -940,16 +991,8 @@ with col2:
 
 with col3:
     if st.button("🏠", help="Домой", key="btn_home"):
-        # # Сначала добавляем текущую страницу в историю (СТАРАЯ ЛОГИКА st.session_state.nav_history - УДАЛЕНО)
-        # current = st.session_state.get("current_page")
-        # if current and current != "Обзор":
-        #     if "nav_history" not in st.session_state: 
-        #         st.session_state.nav_history = []
-        #     st.session_state.nav_history.append(current) 
-        
-        print("[HOME_BUTTON] Navigating to Обзор") # DEBUG
+        print(f"[{SESSION_ID}] [HOME_BUTTON] Navigating to Обзор") # DEBUG
         navigate_to("Обзор") # Вызываем нашу центральную функцию
-        # st.rerun() # navigate_to уже содержит rerun
 
 # Получаем данные для фильтров
 filter_data = data_dict.get("navigation_data")
@@ -975,10 +1018,6 @@ if st.session_state.role == "admin":
         st.rerun()
     if st.sidebar.button("📅 Планирование рефакторинга", key="sidebar_refactor_planning"):
         navigate_to("Планирование рефакторинга")
-        # st.rerun() # navigate_to_app уже должен это делать
-
-# Раздел История в app.py - УДАЛЯЕМ ЭТОТ БЕЗУСЛОВНЫЙ ЗАГОЛОВОК
-# st.sidebar.subheader("История") 
 
 # --- Отображение истории из БД --- 
 history_entries_df = pd.DataFrame()
@@ -995,74 +1034,15 @@ if "user_id" in st.session_state:
             """)
             history_entries_df = pd.read_sql(query_text, connection, params={"user_id": current_user_id_for_display})
     except Exception as e:
-        st.sidebar.error(f"Ошибка загрузки истории: {e}")
+        st.sidebar.error(f"[{SESSION_ID}] Ошибка загрузки истории: {e}")
 
 if not history_entries_df.empty:
     st.sidebar.subheader("История") 
     for index, entry in history_entries_df.iterrows():
         entry_display_name = entry.get("display_name", "Запись истории")
-        # db_page_key = entry.get("page_key", "overview") 
-        # entry_url_params_stored = entry.get("url_params")
-        
-        # # --- Логика для генерации кликабельных ссылок (ВРЕМЕННО ОТКЛЮЧЕНА) ---
-        # entry_url_params_dict = {}
-        # if isinstance(entry_url_params_stored, str):
-        #     try:
-        #         entry_url_params_dict = json.loads(entry_url_params_stored)
-        #     except Exception as e:
-        #         print(f"[HISTORY DISPLAY] Error parsing url_params JSON for item {entry.get('id')}: {e}")
-        #         entry_url_params_dict = {"page": db_page_key} 
-        # elif isinstance(entry_url_params_stored, dict):
-        #     entry_url_params_dict = entry_url_params_stored
-        # else: 
-        #     entry_url_params_dict = {"page": db_page_key}
-
-        # page_slug_for_link = entry_url_params_dict.get("page", db_page_key)
-        # if page_slug_for_link:
-        #     page_slug_for_link = str(page_slug_for_link).lower().replace(" ", "_").replace("⚙️_","")
-        # else:
-        #     page_slug_for_link = "overview" 
-            
-        # link_params = {k: v for k, v in entry_url_params_dict.items() if k != 'page'}
-
-        # print(f"[HISTORY DISPLAY] For entry '{entry_display_name}':")
-        # print(f"  page_slug_for_link: '{page_slug_for_link}'")
-        # print(f"  link_params: {link_params}")
-
-        # try:
-        #     history_item_url = navigation_utils.create_page_link(page_slug_for_link, **link_params)
-        #     print(f"  Generated URL: {history_item_url}") 
-            
-        #     link_style = (
-        #         "font-size: 0.78rem; "         
-        #         "display: block; "            
-        #         "margin-bottom: 4px; "       
-        #         "padding: 0.1rem 0.2rem; "    
-        #         "text-decoration: none; "     
-        #         "color: #e0e0e0;"             
-        #         "border-radius: 3px;"        
-        #         "white-space: normal;"       
-        #         "overflow-wrap: break-word;" 
-        #     )
-            
-        #     st.sidebar.markdown(
-        #         f"<a href='{history_item_url}' target='_self' style='{link_style}' "
-        #         f"onmouseover=\"this.style.backgroundColor='rgba(77, 166, 255, 0.1)'; this.style.color='#ffffff';\" "
-        #         f"onmouseout=\"this.style.backgroundColor='transparent'; this.style.color='#e0e0e0';\">"
-        #         f"{entry_display_name}</a>", 
-        #         unsafe_allow_html=True
-        #     )
-        # except Exception as e:
-        #     st.sidebar.text(f"Ошибка создания ссылки: {entry_display_name}")
-        #     print(f"[HISTORY DISPLAY] Error creating history link for '{entry_display_name}': {e}")
-        # --- КОНЕЦ ЛОГИКИ ДЛЯ КЛИКАБЕЛЬНЫХ ССЫЛОК ---
-
-        # Просто отображаем текст
         st.sidebar.markdown(f"<div style='font-size: 0.78rem; color: #e0e0e0; padding: 0.1rem 0.2rem; margin-bottom: 4px; white-space: normal; overflow-wrap: break-word;'>{entry_display_name}</div>", unsafe_allow_html=True)
 
 else:
-    # Заголовок "История" не показываем, если истории нет
-    # st.sidebar.subheader("История") # Убрано отсюда
     st.sidebar.markdown("_Пока нет истории посещений_")
 # --- Конец отображения истории из БД ---
 
@@ -1109,17 +1089,17 @@ PAGES = {
 # Запускаем выбранную страницу с данными
 current_page_to_render = st.session_state.get("current_page", "Обзор") # Всегда берем из session_state, с Обзором как fallback
 
-print(f"[APP RENDER] current_page from session_state for PAGES: {current_page_to_render}") # DEBUG
-print(f"Текущая страница перед запуском: {current_page_to_render}") # Этот print уже был, но оставим для сравнения
-print(f"Доступные страницы: {list(PAGES.keys())}")
-print(f"Текущая страница в URL: {params.get('page')}")
+print(f"[{SESSION_ID}] [APP RENDER] current_page from session_state for PAGES: {current_page_to_render}") # DEBUG
+print(f"[{SESSION_ID}] Текущая страница перед запуском: {current_page_to_render}") # Этот print уже был, но оставим для сравнения
+print(f"[{SESSION_ID}] Доступные страницы: {list(PAGES.keys())}")
+print(f"[{SESSION_ID}] Текущая страница в URL: {params.get('page', [None])[0]}") # Пример исправления для .get() на params
 
 if current_page_to_render in PAGES:
-    print(f"Запускаем страницу: {current_page_to_render}")
+    print(f"[{SESSION_ID}] Запускаем страницу: {current_page_to_render}")
     PAGES[current_page_to_render](data_dict)
 else:
-    print(f"Ошибка: страница {current_page_to_render} не найдена в PAGES")
-    st.error(f"Страница {current_page_to_render} не найдена")
+    print(f"[{SESSION_ID}] Ошибка: страница {current_page_to_render} не найдена в PAGES")
+    st.error(f"[{SESSION_ID}] Страница {current_page_to_render} не найдена")
 
 # Показываем информацию пользователя и кнопку выхода
 auth.show_user_menu()

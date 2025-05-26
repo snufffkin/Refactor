@@ -152,19 +152,17 @@ def logout():
     # st.session_state.filter_program = None
     # ... и другие фильтры ...
 
-    # Сбрасываем URL на базовый (например, страница обзора или корень)
-    # Это предотвратит загрузку последней страницы предыдущего пользователя для нового.
-    st.query_params.clear() # Очищаем все текущие query_params
-    st.query_params = {"page": "overview"} # Устанавливаем на страницу обзора
+    # Сбрасываем URL на базовый
+    # st.query_params = {"page": "overview"} # Старый вариант
+    st.query_params.clear()
+    st.query_params["page"] = "overview"
     print("[LOGOUT] Session state cleared and query_params reset to overview.")
     # st.rerun() вызывается в show_user_menu после вызова logout()
 
 def login_page(engine):
     """Отображение страницы входа и регистрации"""
-    
-    # Используем st.query_params для определения, какую вкладку показать по умолчанию
-    query_params = st.query_params
-    active_tab_key = query_params.get("form", "login") # "login" или "register"
+    query_params = st.query_params # Читаем напрямую
+    active_tab_key = query_params.get("form", "login") 
 
     # Создаем вкладки
     # Чтобы управлять активной вкладкой через URL, нам нужен более сложный подход или использование компонента.
@@ -186,9 +184,10 @@ def login_page(engine):
             
             if submitted_login:
                 if authenticate(username_login, password_login, engine):
-                    # Сбрасываем query_params, чтобы при обновлении не оставался ?form=register
+                    target_page_slug_on_login = st.session_state.get("current_page", "overview").lower().replace(" ","_")
+                    # st.query_params = {"page": target_page_slug_on_login} # Старый вариант
                     st.query_params.clear()
-                    st.query_params = {"page": st.session_state.get("current_page", "overview").lower().replace(" ","_")}
+                    st.query_params["page"] = target_page_slug_on_login
                     st.rerun()
         
         if st.session_state.get("login_error"):

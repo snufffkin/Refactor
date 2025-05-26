@@ -985,14 +985,15 @@ def load_gz_data(program=None, module=None, lesson=None, _engine=None, update_tr
     return pd.read_sql(text(query), _engine, params=params)
 
 @st.cache_data(ttl=1800)  # Кэширование на 30 минут
-def load_card_data(program=None, module=None, lesson=None, gz=None, _engine=None, update_trigger=0):
+def load_card_data(program=None, module=None, lesson=None, gz=None, card_id=None, _engine=None, update_trigger=0):
     """
     Загружает данные карточек для указанных параметров фильтрации.
+    Если указан card_id, загружает данные только для этой карточки, игнорируя другие фильтры для основного запроса.
     """
     if _engine is None:
         _engine = get_engine()
     
-    query = """
+    query = """ 
         SELECT 
             cs.*,
             cm.total_attempts, cm.attempted_share, cm.success_rate, 
@@ -1010,26 +1011,33 @@ def load_card_data(program=None, module=None, lesson=None, gz=None, _engine=None
     params = {}
     where_clauses = []
     
-    if program:
-        where_clauses.append("cs.program_name = :program")
-        params["program"] = program
+    if card_id is not None:
+        where_clauses.append("cs.card_id = :card_id")
+        params["card_id"] = int(card_id) # Убедимся, что это int для сравнения с БД
+    else:
+        # Применяем фильтры по иерархии только если card_id не указан
+        if program:
+            where_clauses.append("cs.program_name = :program")
+            params["program"] = program
         
-    if module:
-        where_clauses.append("cs.module_name = :module")
-        params["module"] = module
-        
-    if lesson:
-        where_clauses.append("cs.lesson_name = :lesson")
-        params["lesson"] = lesson
-        
-    if gz:
-        where_clauses.append("cs.gz_name = :gz")
-        params["gz"] = gz
+        if module:
+            where_clauses.append("cs.module_name = :module")
+            params["module"] = module
+            
+        if lesson:
+            where_clauses.append("cs.lesson_name = :lesson")
+            params["lesson"] = lesson
+            
+        if gz:
+            where_clauses.append("cs.gz_name = :gz")
+            params["gz"] = gz
     
     if where_clauses:
         query += " WHERE " + " AND ".join(where_clauses)
         
-    query += " ORDER BY cs.program_name, cs.module_order, cs.lesson_order, cs.gz_name"
+    # Сортировка имеет смысл, если не ищем по card_id или если card_id не уникален (что не должно быть)
+    if card_id is None:
+        query += " ORDER BY cs.program_name, cs.module_order, cs.lesson_order, cs.gz_name"
     
     return pd.read_sql(text(query), _engine, params=params)
 
@@ -1151,7 +1159,7 @@ def load_data_parallel(program=None, module=None, lesson=None, gz=None, _engine=
 # ------------------ Объединенная функция загрузки данных --------------------- #
 
 @st.cache_data(ttl=3600)
-def load_all_data_for_level(level="overview", program=None, module=None, lesson=None, gz=None, _engine=None, max_workers=4, update_trigger=0):
+def load_all_data_for_level(level="overview", program=None, module=None, lesson=None, gz=None, selected_card_id_arg=None, _engine=None, max_workers=4, update_trigger=0):
     """
     Загружает все необходимые данные для указанного уровня навигации, используя параллельную загрузку.
     
@@ -1161,6 +1169,7 @@ def load_all_data_for_level(level="overview", program=None, module=None, lesson=
         module: Название модуля для фильтрации
         lesson: Название урока для фильтрации
         gz: Название группы заданий для фильтрации
+        selected_card_id_arg: ID выбранной карточки (если применимо для уровня card)
         _engine: SQLAlchemy engine для подключения к БД
         max_workers: Максимальное количество параллельных рабочих потоков
         
@@ -1206,11 +1215,11 @@ def load_all_data_for_level(level="overview", program=None, module=None, lesson=
         result["gz_data"] = load_gz_data(program=program, module=module, lesson=lesson, _engine=_engine, update_trigger=update_trigger)
         result["gz_data"] = result["gz_data"][result["gz_data"]["gz_name"] == gz]
     
-    elif level == "card" and "card_id" in st.session_state: # Проверяем st.session_state для card_id
-        card_id_for_load = st.session_state["card_id"] # Используем card_id из session_state
+    elif level == "card" and selected_card_id_arg is not None: # Проверяем selected_card_id_arg
+        card_id_for_load = selected_card_id_arg # Используем переданный аргумент
         # Загружаем данные для конкретной карточки, передавая update_trigger
         # Здесь нет parallel_data, так как это специфичный вызов для одной карточки
-        card_data_df = load_card_data(program=program, module=module, lesson=lesson, gz=gz, _engine=_engine, update_trigger=update_trigger)
+        card_data_df = load_card_data(program=program, module=module, lesson=lesson, gz=gz, card_id=card_id_for_load, _engine=_engine, update_trigger=update_trigger)
         if not card_data_df.empty:
             # Фильтруем по card_id. Убедимся, что card_id_for_load это число для сравнения
             try:
@@ -1275,6 +1284,44 @@ def get_active_tasks_count(_engine, user_id: int) -> int:
     except Exception as e:
         print(f"Error counting active tasks: {e}")
         return 0
+
+@st.cache_data(ttl=300)  # Кэширование на 5 минут
+def load_user_specific_assignments(_engine, user_id: int, update_trigger=0):
+    """
+    Загружает все назначения для конкретного пользователя из таблицы card_assignments,
+    объединяя с cards_structure для получения названий программы, модуля, урока, ГЗ.
+    """
+    if _engine is None:
+        _engine = get_engine()
+    
+    if user_id is None:
+        return pd.DataFrame() # Возвращаем пустой DataFrame, если user_id не предоставлен
+
+    sql = text("""
+        SELECT
+            ca.assignment_id,
+            ca.card_id,
+            ca.user_id,
+            u.username AS assigned_user,
+            ca.assigned_by AS assigned_by_user_id,
+            assigner.username AS assigner_user,
+            ca.status,
+            ca.due_date,
+            ca.created_at,
+            ca.updated_at,
+            cs.program_name,
+            cs.module_name,
+            cs.lesson_name,
+            cs.gz_name,
+            cs.card_url
+        FROM card_assignments ca
+        JOIN cards_structure cs ON ca.card_id = cs.card_id
+        JOIN users u ON ca.user_id = u.user_id
+        LEFT JOIN users assigner ON ca.assigned_by = assigner.user_id
+        WHERE ca.user_id = :user_id
+        ORDER BY ca.created_at DESC
+    """)
+    return pd.read_sql(sql, _engine, params={"user_id": user_id})
 
 # ------------------ User Action History --------------------- #
 

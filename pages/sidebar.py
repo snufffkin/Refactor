@@ -46,11 +46,13 @@ def render_sidebar():
                 if page == "refactor_planning":
                     print(f"Переход на страницу планирования рефакторинга через боковое меню")
                     st.session_state.current_page = "Планирование рефакторинга"
-                    st.query_params = {"page": page}
+                    st.query_params.clear()
+                    st.query_params["page"] = page
                     st.rerun()
                 else:
                     st.session_state.current_page = label
-                    st.query_params = {"page": page}
+                    st.query_params.clear()
+                    st.query_params["page"] = page
                     st.rerun()
     
     # Страницы методиста, доступные для всех ролей методиста
@@ -61,7 +63,8 @@ def render_sidebar():
         methodist_page_key = "my_tasks"
         if st.sidebar.button(methodist_label, key="sidebar_my_tasks"):
             st.session_state.current_page = methodist_label
-            st.query_params = {"page": methodist_page_key}
+            st.query_params.clear()
+            st.query_params["page"] = methodist_page_key
             st.rerun()
     
     # Раздел История
@@ -73,7 +76,8 @@ def render_sidebar():
             page_key = page_name.lower().replace(" ", "_") # Примерное преобразование в ключ
             if st.sidebar.button(page_name, key=f"sidebar_history_{page_key}"):
                 st.session_state.current_page = page_name
-                st.query_params = {"page": page_key}
+                st.query_params.clear()
+                st.query_params["page"] = page_key
                 st.rerun()
     else:
         st.sidebar.markdown("_Пока нет истории_")
@@ -87,6 +91,12 @@ def render_sidebar():
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.rerun()
+
+    # DEBUG: Отображение query_params и session_state
+    query_params = st.query_params
+    st.sidebar.caption("Debug Info:")
+    st.sidebar.json({"query_params": query_params, 
+                     "session_state": st.session_state})
 
 def sidebar_filters(df_full, create_link_fn=None):
     """

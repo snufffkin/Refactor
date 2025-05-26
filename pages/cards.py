@@ -63,14 +63,17 @@ def display_card_details(card_data):
             trickiness_color = "red"
         
         # Собираем данные о карточке
+        risk_value = card_data.get('risk')
+        risk_display = f"{risk_value:.3f}" if pd.notna(risk_value) else "N/A"
+
         card_info = {
             "ID карточки": int(card_data["card_id"]),
-            "Тип карточки": card_data["card_type"] if "card_type" in card_data else "Не указан",
-            "Программа": card_data["program_name"],
-            "Модуль": card_data["module_name"],
-            "Урок": card_data["lesson_name"],
-            "Группа заданий": card_data["gz_name"],
-            "Текущий риск": f"{card_data['risk']:.3f}"
+            "Тип карточки": card_data.get("card_type", "Не указан"), # Используем .get для безопасности
+            "Программа": card_data.get("program_name", "N/A"),
+            "Модуль": card_data.get("module_name", "N/A"),
+            "Урок": card_data.get("lesson_name", "N/A"),
+            "Группа заданий": card_data.get("gz_name", "N/A"),
+            "Текущий риск": risk_display
         }
         
         # Отображаем основную информацию
@@ -85,17 +88,38 @@ def display_card_details(card_data):
         # Метрики карточки
         st.markdown("### Ключевые метрики")
         
-        # Отображаем метрики с подходящим форматированием
+        # Безопасное получение и форматирование метрик
+        sr = card_data.get('success_rate')
+        ft_sr = card_data.get('first_try_success_rate')
+        s_diff = card_data.get('success_diff') 
+        da = card_data.get('discrimination_avg')
+        
+        # Безопасное получение complaints_total
+        ct_raw = card_data.get('complaints_total')
+        if pd.notna(ct_raw):
+            ct = ct_raw
+        else:
+            cr_for_calc = card_data.get('complaint_rate')
+            ta_for_calc = card_data.get('total_attempts')
+            if pd.notna(cr_for_calc) and pd.notna(ta_for_calc):
+                ct = cr_for_calc * ta_for_calc
+            else:
+                ct = np.nan # Если не можем вычислить, ставим NaN
+                
+        cr = card_data.get('complaint_rate')
+        as_ = card_data.get('attempted_share')
+        ta = card_data.get('total_attempts')
+
         metrics = {
-            "Успешность": f"{card_data['success_rate']:.1%}",
-            "Успешность с первой попытки": f"{card_data['first_try_success_rate']:.1%}",
-            "Разница": f"{card_data['success_rate'] - card_data['first_try_success_rate']:.1%}",
-            "Уровень подлости": f"<span style='color:{trickiness_color};font-weight:bold;'>{trickiness_text}</span>",
-            "Дискриминативность": f"{card_data['discrimination_avg']:.3f}",
-            "Количество жалоб": f"{card_data.get('complaints_total', card_data['complaint_rate'] * card_data['total_attempts']):.0f}",
-            "Доля жалоб": f"{card_data['complaint_rate']:.1%}",
-            "Доля пытавшихся": f"{card_data['attempted_share']:.1%}",
-            "Количество попыток": f"{card_data['total_attempts']:.0f}"
+            "Успешность": f"{sr:.1%}" if pd.notna(sr) else "N/A",
+            "Успешность с первой попытки": f"{ft_sr:.1%}" if pd.notna(ft_sr) else "N/A",
+            "Разница": f"{s_diff:.1%}" if pd.notna(s_diff) else "N/A",
+            "Уровень подлости": f"<span style='color:{trickiness_color};font-weight:bold;'>{trickiness_text}</span>", # trickiness_text уже обработан
+            "Дискриминативность": f"{da:.3f}" if pd.notna(da) else "N/A",
+            "Количество жалоб": f"{ct:.0f}" if pd.notna(ct) else "N/A",
+            "Доля жалоб": f"{cr:.1%}" if pd.notna(cr) else "N/A",
+            "Доля пытавшихся": f"{as_:.1%}" if pd.notna(as_) else "N/A",
+            "Количество попыток": f"{ta:.0f}" if pd.notna(ta) else "N/A"
         }
         
         for key, value in metrics.items():
@@ -230,55 +254,59 @@ def display_risk_components(card_data):
     """
     st.markdown("## Анализ компонентов риска")
     
-    # Получаем параметры из конфигурации
     config = core.get_config()
-    
-    # Рассчитываем риски отдельных метрик
     card_dict = card_data.to_dict()
-    risk_discr = core.discrimination_risk_score(card_data["discrimination_avg"])
-    risk_success = core.success_rate_risk_score(card_data["success_rate"])
-    risk_trickiness = core.trickiness_risk_score(card_dict)
-    risk_complaints = core.complaint_risk_score(card_dict)
-    risk_attempted = core.attempted_share_risk_score(card_data["attempted_share"])
+
+    # Безопасно получаем значения метрик из card_data
+    d_avg = card_data.get("discrimination_avg")
+    s_rate = card_data.get("success_rate")
+    # trickiness_level и success_diff уже должны быть в card_data с обработкой None/NaN из page_cards
+    # complaints_total и attempted_share также используются в core.complaint_risk_score и core.attempted_share_risk_score
+    # которые, будем надеяться, устойчивы к None в card_dict (они ожидают DataFrame)
     
-    # Определяем максимальный риск
-    max_risk = max(risk_discr, risk_success, risk_trickiness, risk_complaints, risk_attempted)
+    # Функции core.*_risk_score должны возвращать число или NaN, если входные данные некорректны
+    risk_discr = core.discrimination_risk_score(d_avg) if pd.notna(d_avg) else np.nan
+    risk_success = core.success_rate_risk_score(s_rate) if pd.notna(s_rate) else np.nan
+    risk_trickiness = core.trickiness_risk_score(card_dict) # Предполагаем, что эта функция устойчива или вернет NaN
+    risk_complaints = core.complaint_risk_score(card_dict) # Аналогично
+    risk_attempted = core.attempted_share_risk_score(card_data.get("attempted_share")) if pd.notna(card_data.get("attempted_share")) else np.nan
+
+    # Определяем максимальный риск, игнорируя NaN
+    all_risks_list = [r for r in [risk_discr, risk_success, risk_trickiness, risk_complaints, risk_attempted] if pd.notna(r)]
+    max_risk = np.max(all_risks_list) if all_risks_list else np.nan
     
-    # Получаем веса из конфигурации
     WEIGHT_DISCRIMINATION = config["weights"]["discrimination"]
     WEIGHT_SUCCESS_RATE = config["weights"]["success_rate"]
     WEIGHT_TRICKINESS = config["weights"].get("trickiness", 0.15)
     WEIGHT_COMPLAINT_RATE = config["weights"]["complaint_rate"]
     WEIGHT_ATTEMPTED = config["weights"]["attempted"]
     
-    # Рассчитываем взвешенное среднее
-    weighted_avg_risk = (
-        WEIGHT_DISCRIMINATION * risk_discr +
-        WEIGHT_SUCCESS_RATE * risk_success +
-        WEIGHT_TRICKINESS * risk_trickiness +
-        WEIGHT_COMPLAINT_RATE * risk_complaints +
-        WEIGHT_ATTEMPTED * risk_attempted
-    )
+    # Рассчитываем взвешенное среднее, обрабатывая NaN
+    weighted_sum = 0
+    total_weight = 0
+    if pd.notna(risk_discr): weighted_sum += WEIGHT_DISCRIMINATION * risk_discr; total_weight += WEIGHT_DISCRIMINATION
+    if pd.notna(risk_success): weighted_sum += WEIGHT_SUCCESS_RATE * risk_success; total_weight += WEIGHT_SUCCESS_RATE
+    if pd.notna(risk_trickiness): weighted_sum += WEIGHT_TRICKINESS * risk_trickiness; total_weight += WEIGHT_TRICKINESS
+    if pd.notna(risk_complaints): weighted_sum += WEIGHT_COMPLAINT_RATE * risk_complaints; total_weight += WEIGHT_COMPLAINT_RATE
+    if pd.notna(risk_attempted): weighted_sum += WEIGHT_ATTEMPTED * risk_attempted; total_weight += WEIGHT_ATTEMPTED
     
+    weighted_avg_risk = (weighted_sum / total_weight) if total_weight > 0 else np.nan
+
     col1, col2 = st.columns([2, 3])
     
     with col1:
-        # Отображаем результаты расчета
+        st.markdown("---")
         st.markdown("### Риск по метрикам")
         
-        # Определение категорий риска и цветов
-        def risk_category(risk):
-            if risk > 0.75:
-                return "Критический", "red"
-            elif risk > 0.5:
-                return "Высокий", "orange"
-            elif risk > 0.25:
-                return "Умеренный", "gold"
-            else:
-                return "Низкий", "green"
+        def risk_category_safe(risk_value):
+            if not pd.notna(risk_value):
+                return "N/A", "grey"
+            if risk_value > 0.75: return "Критический", "red"
+            elif risk_value > 0.5: return "Высокий", "orange"
+            elif risk_value > 0.25: return "Умеренный", "gold"
+            else: return "Низкий", "green"
         
-        # Словарь с рисками для отображения
-        risks = {
+        risks_map = {
             "Дискриминативность": risk_discr,
             "Успешность": risk_success,
             "Подлость": risk_trickiness,
@@ -286,84 +314,105 @@ def display_risk_components(card_data):
             "Доля пытавшихся": risk_attempted
         }
         
-        # Отображаем риски по метрикам с категориями
-        for metric, risk in risks.items():
-            category, color = risk_category(risk)
-            st.markdown(f"**{metric}**: {risk:.3f} - <span style='color:{color};'>{category}</span>", unsafe_allow_html=True)
+        for metric, risk_val in risks_map.items():
+            category, color = risk_category_safe(risk_val)
+            risk_display_text = f"{risk_val:.3f}" if pd.notna(risk_val) else "N/A"
+            st.markdown(f"**{metric}**: {risk_display_text} - <span style='color:{color};'>{category}</span>", unsafe_allow_html=True)
         
         st.markdown("---")
-        
-        # Отображаем промежуточные значения расчета
         st.markdown("### Формула расчета")
-        st.markdown(f"**Взвешенное среднее**: {weighted_avg_risk:.3f}")
-        st.markdown(f"**Максимальный риск**: {max_risk:.3f}")
         
-        # Определяем минимальный порог риска
+        # 1. Вычисляем все необходимые значения
         min_threshold = 0
-        if max_risk > config["risk_thresholds"]["critical"]:
-            min_threshold = config["risk_thresholds"]["min_for_critical"]
-        elif max_risk > config["risk_thresholds"]["high"]:
-            min_threshold = config["risk_thresholds"]["min_for_high"]
+        if pd.notna(max_risk): # max_risk вычислен ранее
+            if max_risk > config["risk_thresholds"]["critical"]: 
+                min_threshold = config["risk_thresholds"]["min_for_critical"]
+            elif max_risk > config["risk_thresholds"]["high"]: 
+                min_threshold = config["risk_thresholds"]["min_for_high"]
         
-        st.markdown(f"**Минимальный порог**: {min_threshold:.3f}")
-        
-        # Комбинированный риск
         alpha = config["risk_thresholds"]["alpha_weight_avg"]
-        combined_risk = alpha * weighted_avg_risk + (1 - alpha) * max_risk
-        st.markdown(f"**Комбинированный риск**: {combined_risk:.3f}")
+        combined_risk_val = np.nan # Используем суффикс _val для вычисленных значений
+        if pd.notna(weighted_avg_risk) and pd.notna(max_risk):
+            combined_risk_val = alpha * weighted_avg_risk + (1 - alpha) * max_risk
         
-        # Сырой риск (без корректировки)
-        raw_risk = max(weighted_avg_risk, combined_risk, min_threshold)
-        st.markdown(f"**Сырой риск**: {raw_risk:.3f}")
+        raw_risk_val = np.nan
+        # Убедимся, что min_threshold это число для np.max, если weighted_avg_risk или combined_risk_val - NaN
+        # np.nanmax игнорирует NaN, но если все NaN, вернет ошибку. Лучше собрать список не-NaN значений.
+        raw_risk_components = [r for r in [weighted_avg_risk, combined_risk_val, float(min_threshold)] if pd.notna(r)]
+        if raw_risk_components:
+            raw_risk_val = np.max(raw_risk_components)
+            
+        ta_for_confidence = card_data.get("total_attempts")
+        confidence_factor_val = np.nan
+        if pd.notna(ta_for_confidence):
+            significance_threshold = config["stats"]["significance_threshold"]
+            if significance_threshold > 0: # Избегаем деления на ноль
+                confidence_factor_val = min(ta_for_confidence / significance_threshold, 1.0)
+            else:
+                confidence_factor_val = 1.0 # Если порог 0, считаем доверие максимальным
         
-        # Корректировка на статистическую значимость
-        significance_threshold = config["stats"]["significance_threshold"]
-        neutral_risk_value = config["stats"]["neutral_risk_value"]
-        confidence_factor = min(card_data["total_attempts"] / significance_threshold, 1.0)
+        final_risk_val = np.nan
+        if pd.notna(raw_risk_val) and pd.notna(confidence_factor_val):
+            neutral_risk_value = config["stats"]["neutral_risk_value"]
+            final_risk_val = raw_risk_val * confidence_factor_val + neutral_risk_value * (1 - confidence_factor_val)
+
+        # 2. Теперь форматируем и выводим
+        display_wavr = f"{weighted_avg_risk:.3f}" if pd.notna(weighted_avg_risk) else "N/A"
+        st.markdown(f"**Взвешенное среднее**: {display_wavr}")
         
-        st.markdown(f"**Коэффициент доверия**: {confidence_factor:.2f}")
+        display_maxr = f"{max_risk:.3f}" if pd.notna(max_risk) else "N/A"
+        st.markdown(f"**Максимальный риск**: {display_maxr}")
         
-        # Итоговый риск
-        final_risk = raw_risk * confidence_factor + neutral_risk_value * (1 - confidence_factor)
-        st.markdown(f"**Итоговый риск**: {final_risk:.3f}")
+        st.markdown(f"**Минимальный порог**: {min_threshold:.3f}") 
+        
+        display_combr = f"{combined_risk_val:.3f}" if pd.notna(combined_risk_val) else "N/A"
+        st.markdown(f"**Комбинированный риск**: {display_combr}")
+        
+        display_rawr = f"{raw_risk_val:.3f}" if pd.notna(raw_risk_val) else "N/A"
+        st.markdown(f"**Сырой риск**: {display_rawr}")
+        
+        display_conff = f"{confidence_factor_val:.2f}" if pd.notna(confidence_factor_val) else "N/A"
+        st.markdown(f"**Коэффициент доверия**: {display_conff}")
+        
+        display_finalr = f"{final_risk_val:.3f}" if pd.notna(final_risk_val) else "N/A"
+        st.markdown(f"**Итоговый риск**: {display_finalr}")
     
     with col2:
-        # Создаем DataFrame для визуализации
-        risks_df = pd.DataFrame({
-            "Метрика": list(risks.keys()),
-            "Риск": list(risks.values()),
-            "Вес": [WEIGHT_DISCRIMINATION, WEIGHT_SUCCESS_RATE, WEIGHT_TRICKINESS, WEIGHT_COMPLAINT_RATE, WEIGHT_ATTEMPTED],
-            "Взвешенный риск": [
-                WEIGHT_DISCRIMINATION * risk_discr,
-                WEIGHT_SUCCESS_RATE * risk_success,
-                WEIGHT_TRICKINESS * risk_trickiness,
-                WEIGHT_COMPLAINT_RATE * risk_complaints,
-                WEIGHT_ATTEMPTED * risk_attempted
-            ]
-        })
+        risks_df_data = {
+            "Метрика": [], "Риск": [], "Вес": [], "Взвешенный риск": []
+        }
+        if pd.notna(risk_discr): 
+            risks_df_data["Метрика"].append("Дискриминативность"); risks_df_data["Риск"].append(risk_discr); risks_df_data["Вес"].append(WEIGHT_DISCRIMINATION); risks_df_data["Взвешенный риск"].append(WEIGHT_DISCRIMINATION * risk_discr)
+        if pd.notna(risk_success): 
+            risks_df_data["Метрика"].append("Успешность"); risks_df_data["Риск"].append(risk_success); risks_df_data["Вес"].append(WEIGHT_SUCCESS_RATE); risks_df_data["Взвешенный риск"].append(WEIGHT_SUCCESS_RATE * risk_success)
+        if pd.notna(risk_trickiness): 
+            risks_df_data["Метрика"].append("Подлость"); risks_df_data["Риск"].append(risk_trickiness); risks_df_data["Вес"].append(WEIGHT_TRICKINESS); risks_df_data["Взвешенный риск"].append(WEIGHT_TRICKINESS * risk_trickiness)
+        if pd.notna(risk_complaints): 
+            risks_df_data["Метрика"].append("Жалобы"); risks_df_data["Риск"].append(risk_complaints); risks_df_data["Вес"].append(WEIGHT_COMPLAINT_RATE); risks_df_data["Взвешенный риск"].append(WEIGHT_COMPLAINT_RATE * risk_complaints)
+        if pd.notna(risk_attempted): 
+            risks_df_data["Метрика"].append("Попытки (доля)"); risks_df_data["Риск"].append(risk_attempted); risks_df_data["Вес"].append(WEIGHT_ATTEMPTED); risks_df_data["Взвешенный риск"].append(WEIGHT_ATTEMPTED * risk_attempted)
         
-        # Сортируем по взвешенному риску
-        risks_df = risks_df.sort_values(by="Взвешенный риск", ascending=False)
-        
-        # Создаем график
-        fig = px.bar(
-            risks_df,
-            x="Метрика",
-            y="Взвешенный риск",
-            color="Риск",
-            color_continuous_scale="RdYlGn_r",
-            title="Вклад метрик в общий риск",
-            labels={"Взвешенный риск": "Вклад в риск"},
-            text=risks_df["Риск"].apply(lambda x: f"{x:.2f}")
-        )
-        
-        # Добавляем горизонтальную линию для среднего
-        fig.add_hline(y=weighted_avg_risk, line_dash="dash", line_color="blue", 
-                     annotation_text=f"Взвешенное среднее: {weighted_avg_risk:.2f}", 
-                     annotation_position="top right")
-        
-        fig.update_layout(height=400)
-        st.plotly_chart(fig, use_container_width=True)
+        if risks_df_data["Метрика"]:
+            risks_df = pd.DataFrame(risks_df_data)
+            risks_df = risks_df.sort_values(by="Взвешенный риск", ascending=False)
+            fig = px.bar(
+                risks_df,
+                x="Метрика",
+                y="Взвешенный риск",
+                color="Риск",
+                color_continuous_scale="RdYlGn_r",
+                title="Вклад метрик в общий риск",
+                labels={"Взвешенный риск": "Вклад в риск"},
+                text=risks_df["Риск"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
+            )
+            if pd.notna(weighted_avg_risk):
+                fig.add_hline(y=weighted_avg_risk, line_dash="dash", line_color="blue", 
+                              annotation_text=f"Взвешенное среднее: {weighted_avg_risk:.2f}", 
+                              annotation_position="top right")
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Нет данных для построения графика вклада метрик в риск.")
 
 def display_success_analysis(card_data):
     """
@@ -439,7 +488,11 @@ def display_success_analysis(card_data):
         st.plotly_chart(fig, use_container_width=True)
     
     # Рассчитываем разницу между общей успешностью и успехом с первой попытки
-    success_diff = card_data["success_rate"] - card_data["first_try_success_rate"]
+    # card_data["success_diff"] = card_data["success_rate"] - card_data["first_try_success_rate"] # Старая версия
+    if pd.notna(card_data.get("success_rate")) and pd.notna(card_data.get("first_try_success_rate")):
+        card_data["success_diff"] = card_data["success_rate"] - card_data["first_try_success_rate"]
+    else:
+        card_data["success_diff"] = None # или 0, или np.nan, в зависимости от желаемой дальнейшей обработки
     
     # Отображаем пояснения на основе данных успешности
     st.markdown("### Интерпретация данных успешности")
@@ -465,14 +518,18 @@ def display_success_analysis(card_data):
         first_try_interpretation = "**Низкая успешность с первой попытки** (<50%) указывает на то, что студентам требуется несколько попыток для понимания задания."
     
     diff_interpretation = ""
-    if success_diff > 0.3:
-        diff_interpretation = "**Большая разница** между общей успешностью и успехом с первой попытки (>30%) указывает на то, что карточка может содержать скрытые сложности или неоднозначности, которые студенты преодолевают после нескольких попыток."
-    elif success_diff > 0.2:
-        diff_interpretation = "**Средняя разница** между общей успешностью и успехом с первой попытки (>20%) говорит о том, что карточка требует дополнительных попыток для полного понимания."
+    # Используем card_data.get("success_diff") с проверкой на pd.notna, так как теперь это может быть np.nan
+    current_success_diff = card_data.get("success_diff")
+    if pd.notna(current_success_diff):
+        if current_success_diff > 0.3:
+            diff_interpretation = "**Большая разница** между общей успешностью и успехом с первой попытки (>30%) указывает на то, что карточка может содержать скрытые сложности или неоднозначности, которые студенты преодолевают после нескольких попыток."
+        elif current_success_diff > 0.2:
+            diff_interpretation = "**Средняя разница** между общей успешностью и успехом с первой попытки (>20%) говорит о том, что карточка требует дополнительных попыток для полного понимания."
+        else: # Включая current_success_diff <= 0.2
+            diff_interpretation = "**Небольшая разница** между общей успешностью и успехом с первой попытки (<=20%) указывает на то, что большинство студентов либо сразу понимают задание, либо не могут его решить даже после нескольких попыток."
     else:
-        diff_interpretation = "**Небольшая разница** между общей успешностью и успехом с первой попытки (<20%) указывает на то, что большинство студентов либо сразу понимают задание, либо не могут его решить даже после нескольких попыток."
+        diff_interpretation = "Данные для расчета разницы в успешности отсутствуют."
     
-    # Отображаем интерпретацию
     st.markdown(success_interpretation)
     st.markdown(first_try_interpretation)
     st.markdown(diff_interpretation)
@@ -935,6 +992,28 @@ def display_card_status_form(card_data, engine):
             except Exception as e:
                 st.error(f"Ошибка при обновлении статуса: {str(e)}")
 
+    # Получаем текущие параметры URL для обновления
+    query_params = st.query_params # Читаем напрямую
+
+    # Обновляем URL, чтобы отразить выбранную карточку (если она изменилась)
+    selected_card_id_session = st.session_state.get("selected_card_id")
+    current_card_id_from_url = query_params.get("card_id") 
+
+    if selected_card_id_session and str(current_card_id_from_url) != str(selected_card_id_session):
+        # temp_params = dict(st.query_params)
+        # temp_params["card_id"] = str(selected_card_id_session)
+        # temp_params["page"] = "cards" 
+        # st.query_params = temp_params # Это один из способов
+        
+        # Более явный способ с clear()
+        st.query_params.clear()
+        st.query_params["page"] = "cards"
+        st.query_params["card_id"] = str(selected_card_id_session)
+        # Если нужно сохранить другие существующие query_params, их нужно прочитать до clear()
+        # и добавить обратно после установки page и card_id. Но для этой логики, похоже, 
+        # достаточно установить только page и card_id.
+        st.rerun()
+
 def get_card_order(card_id, engine):
     """
     Получает порядковый номер карточки (card_order) из базы данных
@@ -1048,7 +1127,9 @@ def page_cards(df_card_details: pd.DataFrame, df_structure: pd.DataFrame, eng):
         st.session_state["selected_card_id"] = selected_card_id
         
         # Обновляем параметр URL для сохранения выбора при обновлении страницы
-        st.query_params["card_id"] = selected_card_id
+        st.query_params.clear()
+        st.query_params["page"] = "cards"
+        st.query_params["card_id"] = str(selected_card_id)
         
         # Перезагружаем страницу для применения выбора
         st.rerun()
@@ -1103,11 +1184,25 @@ def page_cards(df_card_details: pd.DataFrame, df_structure: pd.DataFrame, eng):
     # --- КОНЕЦ БЛОКА ОТОБРАЖЕНИЯ СТАТУСА ---
 
     # Добавляем метрику разницы между success_rate и first_try_success_rate
-    card_data["success_diff"] = card_data["success_rate"] - card_data["first_try_success_rate"]
-    
+    if pd.notna(card_data.get("success_rate")) and pd.notna(card_data.get("first_try_success_rate")):
+        card_data["success_diff"] = card_data["success_rate"] - card_data["first_try_success_rate"]
+    else:
+        card_data["success_diff"] = np.nan # Используем np.nan для числовых колонок, если данные отсутствуют
+
     # Проверяем, есть ли поле trickiness_level, если нет - вычисляем
-    if "trickiness_level" not in card_data:
-        card_data["trickiness_level"] = core.get_trickiness_level(card_data)
+    if "trickiness_level" not in card_data or pd.isna(card_data.get("trickiness_level")):
+        if hasattr(core, 'get_trickiness_level'):
+            # Убедимся, что core.get_trickiness_level может обработать Series или требует dict
+            # Если core.get_trickiness_level ожидает dict, то card_data.to_dict()
+            # Если он векторизован и ожидает DataFrame, то pd.DataFrame([card_data])
+            # Судя по предыдущему использованию, он может принимать строку (Series)
+            try:
+                card_data["trickiness_level"] = core.get_trickiness_level(card_data)
+            except Exception as e_trickiness:
+                print(f"Error calculating trickiness_level in page_cards: {e_trickiness}")
+                card_data["trickiness_level"] = 0 # Fallback
+        else:
+            card_data["trickiness_level"] = 0 
     
     # Получаем card_order из базы данных
     card_order = get_card_order(int(card_data["card_id"]), eng)
