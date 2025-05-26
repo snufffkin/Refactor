@@ -740,7 +740,7 @@ def save_status_changes(original: pd.DataFrame, edited: pd.DataFrame, engine):
                 {
                     "cid": int(row.card_id), 
                     "st": row.status, 
-                    "by": st.session_state.get("user", "demo"), 
+                    "by": st.session_state.get("username", "demo"), 
                     "ts": datetime.utcnow().isoformat()
                 },
             )
@@ -1303,11 +1303,8 @@ def load_user_specific_assignments(_engine, user_id: int, update_trigger=0):
             ca.card_id,
             ca.user_id,
             u.username AS assigned_user,
-            ca.assigned_by AS assigned_by_user_id,
-            assigner.username AS assigner_user,
             ca.status,
-            ca.due_date,
-            ca.created_at,
+            ca.assigned_at,
             ca.updated_at,
             cs.program_name,
             cs.module_name,
@@ -1317,9 +1314,8 @@ def load_user_specific_assignments(_engine, user_id: int, update_trigger=0):
         FROM card_assignments ca
         JOIN cards_structure cs ON ca.card_id = cs.card_id
         JOIN users u ON ca.user_id = u.user_id
-        LEFT JOIN users assigner ON ca.assigned_by = assigner.user_id
         WHERE ca.user_id = :user_id
-        ORDER BY ca.created_at DESC
+        ORDER BY ca.assigned_at DESC
     """)
     return pd.read_sql(sql, _engine, params={"user_id": user_id})
 

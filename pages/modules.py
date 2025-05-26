@@ -8,6 +8,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
+from sqlalchemy import text
 
 import core
 from components.utils import create_hierarchical_header, display_clickable_items
@@ -89,7 +90,75 @@ def page_modules(df: pd.DataFrame):
     
     with col2:
         # display_status_chart(df_module, "lesson_name") # Status не доступен в mv_lesson_stats
-        st.info("Данные о статусах уроков/карточек недоступны на этом уровне.")
+        # st.info("Данные о статусах уроков/карточек недоступны на этом уровне.")
+        # --- НАЧАЛО ИЗМЕНЕНИЙ ДЛЯ ГРАФИКА СТАТУСОВ МОДУЛЯ ---
+        if not df_module.empty and "lesson_name" in df_module.columns:
+            # Получаем уникальные lesson_name из df_module (это уже отфильтрованные уроки текущего модуля)
+            module_lesson_names = df_module["lesson_name"].dropna().unique().tolist()
+            
+            if module_lesson_names:
+                try:
+                    engine = core.get_engine()
+                    current_program_name = st.session_state.get('filter_program')
+                    current_module_name = st.session_state.get('filter_module')
+                    
+                    # 1. Получить lesson_id для уроков этого модуля
+                    lesson_name_placeholders = ", ".join([f":lesson_name_{i}" for i in range(len(module_lesson_names))])
+                    params_lesson_ids = {
+                        "program_name": current_program_name,
+                        "module_name": current_module_name
+                    }
+                    for i, name in enumerate(module_lesson_names):
+                        params_lesson_ids[f"lesson_name_{i}"] = name
+                    
+                    lesson_ids_query = text(f"""
+                        SELECT lesson_id 
+                        FROM lesson_ids 
+                        WHERE program_name = :program_name 
+                          AND module_name = :module_name 
+                          AND lesson_name IN ({lesson_name_placeholders})
+                    """)
+                    
+                    df_lesson_ids_for_module = pd.read_sql(lesson_ids_query, engine, params=params_lesson_ids)
+                    
+                    if not df_lesson_ids_for_module.empty and "lesson_id" in df_lesson_ids_for_module.columns:
+                        lesson_ids_list = df_lesson_ids_for_module["lesson_id"].dropna().unique().tolist()
+                        if lesson_ids_list:
+                            # 2. Получить все card_id для этих lesson_id
+                            lesson_id_placeholders_for_cards = ", ".join([f":lesson_id_{i}" for i in range(len(lesson_ids_list))])
+                            params_card_ids = {f"lesson_id_{i}": lid for i, lid in enumerate(lesson_ids_list)}
+                            
+                            cards_for_module_query = text(f"""
+                                SELECT DISTINCT card_id 
+                                FROM cards_structure 
+                                WHERE lesson_id IN ({lesson_id_placeholders_for_cards})
+                            """)
+                            df_card_ids_for_module = pd.read_sql(cards_for_module_query, engine, params=params_card_ids)
+                            
+                            if not df_card_ids_for_module.empty and "card_id" in df_card_ids_for_module.columns:
+                                card_ids_list = df_card_ids_for_module["card_id"].dropna().unique().tolist()
+                                if card_ids_list:
+                                    # 3. Получить свежие статусы
+                                    df_fresh_statuses_module = core.get_fresh_card_statuses(engine, card_ids_list)
+                                    if not df_fresh_statuses_module.empty and "status" in df_fresh_statuses_module.columns:
+                                        display_status_chart(df_fresh_statuses_module)
+                                    else:
+                                        st.info("Не удалось получить статусы карточек для модуля.")
+                                else:
+                                    st.info("В уроках этого модуля нет карточек.")
+                            else:
+                                st.info("Не найдено карточек для уроков этого модуля.")
+                        else:
+                            st.info("Не найдено ID уроков для выбранного модуля.")
+                    else:
+                        st.info("Не удалось получить ID уроков для выбранного модуля.")
+                except Exception as e:
+                    st.error(f"Ошибка при загрузке статусов карточек для модуля: {e}")
+            else:
+                st.info("В этом модуле нет уроков для анализа статусов.")
+        else:
+            st.info("Данные о статусах карточек недоступны для этого модуля.")
+        # --- КОНЕЦ ИЗМЕНЕНИЙ ДЛЯ ГРАФИКА СТАТУСОВ МОДУЛЯ ---
     
     # 3. Визуализируем уроки в виде столбчатой диаграммы
     st.subheader("📊 Уроки модуля")

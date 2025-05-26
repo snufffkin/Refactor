@@ -1048,42 +1048,19 @@ else:
 
 # Обновленный словарь функций для страниц с передачей словаря данных
 PAGES = {
-    "Обзор": lambda data_dict: pages.page_overview(data_dict.get("programs")),
-    "Программы": lambda data_dict: pages.page_programs(data_dict.get("modules")),
-    "Модули": lambda data_dict: pages.page_modules(data_dict.get("lessons")),
-    "Уроки": lambda data_dict: pages.page_lessons(data_dict.get("gz_list")),
-    "ГЗ": lambda data_dict: pages.page_gz(
-        df_cards_input=data_dict.get("cards"), 
-        eng=engine,  # Передаем engine
-        create_link_fn=create_internal_link
-    ),
-    "Карточки": lambda data_dict: pages.page_cards(
-        df_card_details=data_dict.get("card_page_data"), 
-        df_structure=data_dict.get("navigation_data"), 
-        eng=engine
-    ),
-    "⚙️ Настройки": lambda data_dict: pages.page_admin(
-        data_dict.get("full_data", pd.DataFrame()),
-        engine
-    ),
+    "Обзор": lambda data_dict: pages.page_overview(data_dict.get("programs", pd.DataFrame())),
+    "Программы": lambda data_dict: pages.page_programs(data_dict.get("modules", pd.DataFrame())),
+    "Модули": lambda data_dict: pages.page_modules(data_dict.get("lessons", pd.DataFrame())),
+    "Уроки": lambda data_dict: pages.page_lessons(data_dict.get("gz_list", pd.DataFrame())),
+    "ГЗ": lambda data_dict: pages.page_gz(df_cards_input=data_dict.get("cards", pd.DataFrame()), eng=engine, create_link_fn=create_internal_link),
+    "Карточки": lambda data_dict: pages.page_cards(df_card_details=data_dict.get("card_page_data", pd.DataFrame()), df_structure=data_dict.get("navigation_data", pd.DataFrame()), eng=engine),
+    "⚙️ Настройки": lambda data_dict: pages.page_admin(data_dict.get("full_data", pd.DataFrame())),
     "Мои задачи": lambda data_dict: pages.my_tasks.page_my_tasks(
-        data_dict.get("full_data", pd.DataFrame()),
-        engine,
-        data_dict.get("assignments", []),
-        st.session_state.get("selected_assignment_id"),
-        update_task_status,
-        create_task_link
-    ),
-    "Панель администратора методистов": lambda data_dict: pages.methodist_admin.page_methodist_admin(
-        data_dict.get("full_data", pd.DataFrame()),
-        engine,
-        data_dict.get("users", []),
-        data_dict.get("assignments", [])
-    ),
-    "Планирование рефакторинга": lambda data_dict: pages.refactor_planning.page_refactor_planning(
-        data_dict.get("full_data", pd.DataFrame()),
+        data_dict.get("assignments", pd.DataFrame()), 
         engine
     ),
+    "Панель администратора методистов": lambda data_dict: pages.methodist_admin.page_methodist_admin(data_dict.get("all_assignments_data", pd.DataFrame()), engine),
+    "Планирование рефакторинга": lambda data_dict: pages.refactor_planning.page_refactor_planning(data_dict.get("all_cards_for_planning", pd.DataFrame())),
 }
 
 # Запускаем выбранную страницу с данными

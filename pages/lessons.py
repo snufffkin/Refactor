@@ -87,7 +87,52 @@ def page_lessons(df: pd.DataFrame):
     
     with col2:
         # display_status_chart(df_lesson, "gz_name") # Status не доступен
-        st.info("Данные о статусах ГЗ недоступны на этом уровне.")
+        # st.info("Данные о статусах ГЗ недоступны на этом уровне.")
+        # --- НАЧАЛО ИЗМЕНЕНИЙ ДЛЯ ГРАФИКА СТАТУСОВ УРОКА ---
+        if not df_lesson.empty and "gz_id" in df_lesson.columns:
+            lesson_gz_ids = df_lesson["gz_id"].dropna().unique().tolist()
+            if lesson_gz_ids:
+                try:
+                    engine = core.get_engine()
+                    # 1. Получить все card_id для ГЗ этого урока
+                    # Мы не можем использовать card_ids_query напрямую, так как он требует lesson_id, 
+                    # а у нас есть gz_ids. Нужно получить card_id из cards_structure по gz_id
+                    
+                    # Формируем строку с плейсхолдерами для gz_ids
+                    gz_id_placeholders = ", ".join([f":gz_id_{i}" for i in range(len(lesson_gz_ids))])
+                    params_card_ids = {f"gz_id_{i}": gz_id for i, gz_id in enumerate(lesson_gz_ids)}
+
+                    cards_for_lesson_query = text(f"""
+                        SELECT DISTINCT card_id 
+                        FROM cards_structure 
+                        WHERE gz_id IN ({gz_id_placeholders})
+                    """)
+                    
+                    df_card_ids_for_lesson = pd.read_sql(cards_for_lesson_query, engine, params=params_card_ids)
+                    
+                    if not df_card_ids_for_lesson.empty and "card_id" in df_card_ids_for_lesson.columns:
+                        card_ids_list = df_card_ids_for_lesson["card_id"].dropna().unique().tolist()
+                        if card_ids_list:
+                            # 2. Получить свежие статусы для этих карточек
+                            df_fresh_statuses_lesson = core.get_fresh_card_statuses(engine, card_ids_list)
+                            if not df_fresh_statuses_lesson.empty and "status" in df_fresh_statuses_lesson.columns:
+                                # 3. Отобразить график статусов
+                                display_status_chart(df_fresh_statuses_lesson) # Передаем DataFrame только со статусами
+                            else:
+                                st.info("Не удалось получить статусы карточек для урока.")
+                        else:
+                            st.info("В ГЗ этого урока нет карточек.")
+                    else:
+                        st.info("Не найдено карточек для ГЗ этого урока.")
+                except Exception as e:
+                    st.error(f"Ошибка при загрузке статусов карточек для урока: {e}")
+            else:
+                st.info("В этом уроке нет ГЗ для анализа статусов.")
+        elif "status" in df_lesson.columns: # Если вдруг статусы есть напрямую (маловероятно для агрегированных данных урока)
+             display_status_chart(df_lesson)
+        else:
+            st.info("Данные о статусах карточек недоступны для этого урока.")
+        # --- КОНЕЦ ИЗМЕНЕНИЙ ДЛЯ ГРАФИКА СТАТУСОВ УРОКА ---
     
     st.subheader("📊 Группы заданий")
     
@@ -589,8 +634,7 @@ def page_lessons(df: pd.DataFrame):
                                 cards_to_insert_in_status.append(card_id)
                         
                         current_user_for_db = st.session_state.get("username", "system_bulk_update") 
-                        st.info(f"[DEBUG lessons.py] Используется username для updated_by: {current_user_for_db}") # Отладочный вывод
-                        print(f"[DEBUG lessons.py] Используется username для updated_by: {current_user_for_db}") # Отладочный вывод в консоль
+                        current_user_id = st.session_state.get("user_id", 1)  # ID пользователя для card_assignments
                         
                         if cards_to_update_in_status:
                             update_stmt = text("""
@@ -624,6 +668,35 @@ def page_lessons(df: pd.DataFrame):
                                         updated_at = EXCLUDED.updated_at;
                                 """)
                                 session.execute(insert_stmt, data_item)
+                        
+                        # Синхронизация с card_assignments (как в cards.py)
+                        for card_id in card_ids_to_update:
+                            # Проверяем, есть ли уже назначение для этой карточки
+                            assignment = session.execute(text(
+                                "SELECT assignment_id FROM card_assignments WHERE card_id = :card_id"
+                            ), {"card_id": card_id}).fetchone()
+                            
+                            if assignment:
+                                # Если есть назначение, обновляем статус
+                                assignment_id = assignment[0]
+                                session.execute(text("""
+                                    UPDATE card_assignments
+                                    SET status = :status, updated_at = CURRENT_TIMESTAMP
+                                    WHERE assignment_id = :assignment_id
+                                """), {
+                                    "status": selected_status,
+                                    "assignment_id": assignment_id
+                                })
+                            else:
+                                # Если нет назначения, создаем его
+                                session.execute(text("""
+                                    INSERT INTO card_assignments (card_id, user_id, status) 
+                                    VALUES (:card_id, :user_id, :status)
+                                """), {
+                                    "card_id": card_id,
+                                    "user_id": current_user_id,
+                                    "status": selected_status
+                                })
                                 
                         session.commit()
                         st.success(f"Статус '{selected_status}' успешно применен к {len(card_ids_to_update)} карточкам урока.")

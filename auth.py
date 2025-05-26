@@ -290,6 +290,87 @@ def get_assigned_cards(engine, user_id: Optional[int] = None) -> pd.DataFrame:
         st.error(f"Ошибка при получении назначенных карточек: {str(e)}")
         return pd.DataFrame()
 
+def get_assigned_cards_unique(engine, user_id: Optional[int] = None) -> pd.DataFrame:
+    """
+    Получение списка уникальных карточек, назначенных пользователю,
+    с агрегированной информацией о всех связанных ГЗ/уроках/модулях
+    
+    Args:
+        engine: SQLAlchemy engine
+        user_id: ID пользователя (опционально)
+        
+    Returns:
+        DataFrame с данными о назначенных карточках (без дубликатов)
+    """
+    try:
+        query = """
+        WITH card_locations AS (
+            -- Собираем все места использования каждой карточки
+            SELECT 
+                cs.card_id,
+                cs.card_type,
+                cs.card_url,
+                ARRAY_AGG(DISTINCT cs.program_name) AS program_names,
+                ARRAY_AGG(DISTINCT cs.module_name) AS module_names,
+                ARRAY_AGG(DISTINCT cs.lesson_name) AS lesson_names,
+                ARRAY_AGG(DISTINCT cs.gz_name) AS gz_names,
+                ARRAY_AGG(DISTINCT cs.gz_id) AS gz_ids,
+                COUNT(DISTINCT cs.gz_id) AS gz_count,
+                COUNT(DISTINCT cs.lesson_name) AS lesson_count
+            FROM cards_structure cs
+            GROUP BY cs.card_id, cs.card_type, cs.card_url
+        )
+        SELECT 
+            ca.assignment_id,
+            ca.card_id,
+            ca.user_id,
+            ca.status,
+            ca.assigned_at,
+            ca.updated_at,
+            ca.notes,
+            cl.card_type,
+            cl.card_url,
+            cl.program_names,
+            cl.module_names,
+            cl.lesson_names,
+            cl.gz_names,
+            cl.gz_ids,
+            cl.gz_count,
+            cl.lesson_count,
+            u.username,
+            u.full_name,
+            u.email,
+            -- Добавляем метрики карточки
+            cm.total_attempts,
+            cm.success_rate,
+            cm.complaint_rate,
+            cm.time_median,
+            -- Добавляем риск
+            crc.risk
+        FROM card_assignments ca
+        JOIN card_locations cl ON ca.card_id = cl.card_id
+        JOIN users u ON ca.user_id = u.user_id
+        LEFT JOIN cards_metrics cm ON ca.card_id = cm.card_id
+        LEFT JOIN card_risk_cache crc ON ca.card_id = crc.card_id
+        """
+        
+        params = {}
+        
+        # Если указан user_id, фильтруем только его карточки
+        if user_id:
+            query += " WHERE ca.user_id = :user_id"
+            params["user_id"] = user_id
+        
+        query += " ORDER BY ca.updated_at DESC"
+        
+        with engine.connect() as conn:
+            result = pd.read_sql(text(query), conn, params=params)
+        
+        return result
+    except Exception as e:
+        st.error(f"Ошибка при получении назначенных карточек: {str(e)}")
+        return pd.DataFrame()
+
 def assign_card_to_user(
     engine,
     card_id: int,

@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 import numpy as np
 import psycopg2 # Добавлено для работы с БД
 from db_config import get_cloud_dsn # Добавлено для подключения к БД
+from sqlalchemy import text
 
 import core
 from components.utils import create_hierarchical_header, display_clickable_items
@@ -139,7 +140,65 @@ def page_programs(df: pd.DataFrame):
     
     with col2:
         # display_status_chart(df_prog, "module_name") # Закомментировано, т.к. status отсутствует
-        st.info("Данные о статусах модулей/карточек недоступны на этом уровне.")
+        # st.info("Данные о статусах модулей/карточек недоступны на этом уровне.")
+        # --- НАЧАЛО ИЗМЕНЕНИЙ ДЛЯ ГРАФИКА СТАТУСОВ ПРОГРАММЫ ---
+        if not df_prog.empty and "module_id" in df_prog.columns: 
+            # df_prog это уже отфильтрованные модули для текущей программы
+            program_module_ids = df_prog["module_id"].dropna().unique().tolist()
+            
+            if program_module_ids:
+                try:
+                    engine = core.get_engine()
+                    
+                    # 1. Получить все lesson_id для модулей этой программы
+                    module_id_placeholders = ", ".join([f":module_id_{i}" for i in range(len(program_module_ids))])
+                    params_lesson_ids = {f"module_id_{i}": mid for i, mid in enumerate(program_module_ids)}
+                    
+                    lesson_ids_query = text(f"""
+                        SELECT DISTINCT lesson_id 
+                        FROM lesson_ids 
+                        WHERE module_id IN ({module_id_placeholders})
+                    """)
+                    df_lesson_ids_for_program = pd.read_sql(lesson_ids_query, engine, params=params_lesson_ids)
+                    
+                    if not df_lesson_ids_for_program.empty and "lesson_id" in df_lesson_ids_for_program.columns:
+                        lesson_ids_list = df_lesson_ids_for_program["lesson_id"].dropna().unique().tolist()
+                        if lesson_ids_list:
+                            # 2. Получить все card_id для этих lesson_id
+                            lesson_id_placeholders_for_cards = ", ".join([f":lesson_id_{i}" for i in range(len(lesson_ids_list))])
+                            params_card_ids = {f"lesson_id_{i}": lid for i, lid in enumerate(lesson_ids_list)}
+                            
+                            cards_for_program_query = text(f"""
+                                SELECT DISTINCT card_id 
+                                FROM cards_structure 
+                                WHERE lesson_id IN ({lesson_id_placeholders_for_cards})
+                            """)
+                            df_card_ids_for_program = pd.read_sql(cards_for_program_query, engine, params=params_card_ids)
+                            
+                            if not df_card_ids_for_program.empty and "card_id" in df_card_ids_for_program.columns:
+                                card_ids_list = df_card_ids_for_program["card_id"].dropna().unique().tolist()
+                                if card_ids_list:
+                                    # 3. Получить свежие статусы
+                                    df_fresh_statuses_program = core.get_fresh_card_statuses(engine, card_ids_list)
+                                    if not df_fresh_statuses_program.empty and "status" in df_fresh_statuses_program.columns:
+                                        display_status_chart(df_fresh_statuses_program)
+                                    else:
+                                        st.info("Не удалось получить статусы карточек для программы.")
+                                else:
+                                    st.info("В уроках этой программы нет карточек.")
+                            else:
+                                st.info("Не найдено карточек для уроков этой программы.")
+                        else:
+                            st.info("В модулях этой программы нет уроков.")
+                    else:
+                        st.info("Не найдено ID уроков для модулей этой программы.")
+                except Exception as e:
+                    st.error(f"Ошибка при загрузке статусов карточек для программы: {e}")
+            else:
+                st.info("В этой программе нет модулей для анализа статусов.")
+        else:
+            st.info("Данные о статусах карточек недоступны для этой программы (отсутствуют ID модулей).")
+        # --- КОНЕЦ ИЗМЕНЕНИЙ ДЛЯ ГРАФИКА СТАТУСОВ ПРОГРАММЫ ---
     
     # 3. Визуализируем модули в виде столбчатой диаграммы
     st.subheader("📊 Модули программы")

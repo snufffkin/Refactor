@@ -192,8 +192,14 @@ def display_status_chart(df, item_col=None):
     status_fig = px.pie(
         status_counts, values="Количество", names="Статус", title="Распределение по статусам",
         color="Статус", color_discrete_map={
-            "new": "#d3d3d3", "in_work": "#add8e6", "ready_for_qc": "#fffacd",
-            "done": "#90ee90", "wont_fix": "#f08080", "unknown": "#cccccc"
+            "new": "blue", 
+            "in_work": "orange", 
+            "review": "purple",
+            "ready_for_qc": "violet", 
+            "done": "green", 
+            "wont_fix": "red", 
+            "archive": "grey",
+            "unknown": "#cccccc"
         }, hole=0.4
     )
     st.plotly_chart(status_fig, use_container_width=True)
