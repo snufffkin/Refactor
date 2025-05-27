@@ -437,39 +437,6 @@ def page_lessons(df: pd.DataFrame):
         with col3:
             st.metric("Доп. материалы", f"{row['addmaterial_rate']:.1f}")
         
-        # Добавляем радарную диаграмму для общего обзора метрик
-        st.markdown("### Сравнение метрик")
-        
-        # Создаем радарную диаграмму для метрик
-        radar_data = pd.DataFrame({
-            'Метрика': ['Общая оценка', 'Интересность', 'Рабочая тетрадь', 'Презентация', 'Доп. материалы'],
-            'Значение': [row["overall_stat"], row["interest_stat"], row["workbook_rate"], 
-                        row["presentation_rate"], row["addmaterial_rate"]]
-        })
-        
-        # Отображаем радарную диаграмму
-        fig = go.Figure()
-        fig.add_trace(go.Scatterpolar(
-            r=radar_data['Значение'],
-            theta=radar_data['Метрика'],
-            fill='toself',
-            name='Оценки',
-            line_color='rgb(77, 166, 255)'
-        ))
-        
-        fig.update_layout(
-            polar=dict(
-                radialaxis=dict(
-                    visible=True,
-                    range=[0, 5]
-                )
-            ),
-            title="Радар оценок материалов",
-            height=400
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
         # Функция для создания карточки отзыва
         def create_review_card(text, is_positive=True):
             bg_color = "rgba(47, 120, 80, 0.1)" if is_positive else "rgba(180, 60, 60, 0.1)"
@@ -520,7 +487,7 @@ def page_lessons(df: pd.DataFrame):
         st.markdown("### Детальные отзывы учителей")
         
         # Инициализация вкладок
-        tabs = st.tabs(["Презентация", "Рабочая тетрадь", "Доп. материалы", "Интересность", "Сложность"])
+        tabs = st.tabs(["Презентация", "Рабочая тетрадь", "Доп. материалы", "Интересность", "Сложность", "AI-суммаризация"])
         
         # Отзывы о презентации
         with tabs[0]:
@@ -571,6 +538,182 @@ def page_lessons(df: pd.DataFrame):
             with col2:
                 st.subheader("Как усложнить")
                 display_reviews_in_subcols(row["complexity_to_complicate"], is_positive=True)
+
+        # AI-суммаризация отзывов
+        with tabs[5]:
+            if "ai_summarization" in row and pd.notna(row["ai_summarization"]):
+                try:
+                    ai_data = row["ai_summarization"]
+                    if isinstance(ai_data, str):
+                        import json
+                        ai_data = json.loads(ai_data)
+                    
+                    # Функция для отображения элементов с приоритетом
+                    def display_priority_items(items, title):
+                        """Отображает список элементов с цветовой кодировкой приоритета"""
+                        if not items:
+                            return
+                        
+                        st.markdown(f"**{title}**")
+                        for item in items:
+                            if isinstance(item, str):
+                                # Определяем цвет фона по эмодзи приоритета
+                                if item.startswith("🔴"):
+                                    bg_color = "rgba(255, 82, 82, 0.1)"
+                                    border_color = "rgba(255, 82, 82, 0.3)"
+                                elif item.startswith("🟠"):
+                                    bg_color = "rgba(255, 159, 64, 0.1)"
+                                    border_color = "rgba(255, 159, 64, 0.3)"
+                                elif item.startswith("🟡"):
+                                    bg_color = "rgba(255, 205, 86, 0.1)"
+                                    border_color = "rgba(255, 205, 86, 0.3)"
+                                elif item.startswith("🟢"):
+                                    bg_color = "rgba(75, 192, 192, 0.1)"
+                                    border_color = "rgba(75, 192, 192, 0.3)"
+                                else:
+                                    bg_color = "rgba(200, 200, 200, 0.1)"
+                                    border_color = "rgba(200, 200, 200, 0.3)"
+                                
+                                st.markdown(f"""
+                                <div style="
+                                    background-color: {bg_color};
+                                    border: 1px solid {border_color};
+                                    border-radius: 4px;
+                                    padding: 8px;
+                                    margin-bottom: 4px;
+                                    font-size: 0.9em;
+                                ">
+                                    {item}
+                                </div>
+                                """, unsafe_allow_html=True)
+                    
+                    # Общая сводка
+                    if "summary" in ai_data:
+                        summary = ai_data["summary"]
+                        st.markdown("### 📊 Общая сводка")
+                        
+                        # Основной вывод
+                        if "main_conclusion" in summary:
+                            st.info(summary["main_conclusion"])
+                        
+                        # Создаем вкладки для приоритетных улучшений и рекомендаций
+                        summary_tabs = st.tabs(["Приоритетные улучшения", "Рекомендации"])
+                        
+                        with summary_tabs[0]:
+                            # Приоритетные улучшения
+                            if "priority_improvements" in summary:
+                                display_priority_items(summary["priority_improvements"], "Приоритетные улучшения:")
+                        
+                        with summary_tabs[1]:
+                            # Объединенные рекомендации
+                            st.markdown("#### Рекомендации по улучшению урока")
+                            
+                            # Собираем все рекомендации в один список с категориями
+                            if "methodist_action_items" in ai_data:
+                                actions = ai_data["methodist_action_items"]
+                                
+                                if "immediate_fixes" in actions and actions["immediate_fixes"]:
+                                    display_priority_items(actions["immediate_fixes"], "Срочные исправления:")
+                                
+                                if "content_additions" in actions and actions["content_additions"]:
+                                    display_priority_items(actions["content_additions"], "Добавить контент:")
+                                
+                                if "structural_changes" in actions and actions["structural_changes"]:
+                                    display_priority_items(actions["structural_changes"], "Структурные изменения:")
+                                
+                                if "content_removals" in actions and actions["content_removals"]:
+                                    display_priority_items(actions["content_removals"], "Удалить контент:")
+                                
+                                if "assessment_recommendations" in actions and actions["assessment_recommendations"]:
+                                    display_priority_items(actions["assessment_recommendations"], "Рекомендации по оценке:")
+                            
+                            if "teacher_recommendations" in ai_data:
+                                teacher_recs = ai_data["teacher_recommendations"]
+                                
+                                if "engagement_ideas" in teacher_recs and teacher_recs["engagement_ideas"]:
+                                    display_priority_items(teacher_recs["engagement_ideas"], "Идеи для вовлечения:")
+                                
+                                if "content_improvements" in teacher_recs and teacher_recs["content_improvements"]:
+                                    display_priority_items(teacher_recs["content_improvements"], "Улучшение контента:")
+                                
+                                if "complexity_adjustments" in teacher_recs and teacher_recs["complexity_adjustments"]:
+                                    display_priority_items(teacher_recs["complexity_adjustments"], "Корректировка сложности:")
+                                
+                                if "methodology_suggestions" in teacher_recs and teacher_recs["methodology_suggestions"]:
+                                    display_priority_items(teacher_recs["methodology_suggestions"], "Методические предложения:")
+                    
+                    # Сильные стороны и проблемы
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown("### 💪 Сильные стороны")
+                        if "key_strengths" in ai_data:
+                            strengths = ai_data["key_strengths"]
+                            
+                            # Презентация
+                            if "presentation" in strengths and strengths["presentation"]:
+                                display_priority_items(strengths["presentation"], "Презентация:")
+                            
+                            # Рабочая тетрадь
+                            if "workbook" in strengths and strengths["workbook"]:
+                                display_priority_items(strengths["workbook"], "Рабочая тетрадь:")
+                            
+                            # Педагогическая ценность
+                            if "pedagogical_value" in strengths and strengths["pedagogical_value"]:
+                                display_priority_items(strengths["pedagogical_value"], "Педагогическая ценность:")
+                            
+                            # Дополнительные материалы
+                            if "additional_materials" in strengths and strengths["additional_materials"]:
+                                display_priority_items(strengths["additional_materials"], "Дополнительные материалы:")
+                    
+                    with col2:
+                        st.markdown("### ⚠️ Выявленные проблемы")
+                        if "identified_issues" in ai_data:
+                            issues = ai_data["identified_issues"]
+                            
+                            # Презентация
+                            if "presentation" in issues and issues["presentation"]:
+                                display_priority_items(issues["presentation"], "Презентация:")
+                            
+                            # Рабочая тетрадь
+                            if "workbook" in issues and issues["workbook"]:
+                                display_priority_items(issues["workbook"], "Рабочая тетрадь:")
+                            
+                            # Баланс сложности
+                            if "complexity_balance" in issues and issues["complexity_balance"]:
+                                display_priority_items(issues["complexity_balance"], "Баланс сложности:")
+                            
+                            # Дополнительные материалы
+                            if "additional_materials" in issues and issues["additional_materials"]:
+                                display_priority_items(issues["additional_materials"], "Дополнительные материалы:")
+                    
+                    # Паттерны и инсайты
+                    if "patterns_and_insights" in ai_data:
+                        st.markdown("### 🔍 Паттерны и инсайты")
+                        patterns = ai_data["patterns_and_insights"]
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            if "teacher_consensus" in patterns:
+                                display_priority_items(patterns["teacher_consensus"], "Консенсус учителей:")
+                            
+                            if "successful_elements" in patterns:
+                                display_priority_items(patterns["successful_elements"], "Успешные элементы:")
+                        
+                        with col2:
+                            if "common_difficulties" in patterns:
+                                display_priority_items(patterns["common_difficulties"], "Общие сложности:")
+                            
+                            if "controversial_points" in patterns:
+                                display_priority_items(patterns["controversial_points"], "Спорные моменты:")
+                    
+                except Exception as e:
+                    st.error(f"Ошибка при обработке AI-суммаризации: {e}")
+                    st.text("Данные AI-суммаризации:")
+                    st.json(row["ai_summarization"])
+            else:
+                st.info("AI-суммаризация для этого урока пока недоступна")
 
     st.subheader("🛠️ Управление статусами карточек урока")
 
