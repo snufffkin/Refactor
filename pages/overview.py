@@ -205,22 +205,52 @@ def get_active_programs():
         st.error(f"Ошибка при подключении к базе данных или выполнении запроса: {e}")
     return active_programs
 
+def get_refactor_programs():
+    """Подключается к БД и возвращает список имен программ к рефакторингу."""
+    refactor_programs = []
+    try:
+        dsn = get_cloud_dsn()
+        with psycopg2.connect(dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT program_name FROM program_ids WHERE program_refactor_status = TRUE")
+                results = cur.fetchall()
+                refactor_programs = [row[0] for row in results]
+    except Exception as e:
+        st.error(f"Ошибка при подключении к базе данных или выполнении запроса: {e}")
+    return refactor_programs
+
 def page_overview(df: pd.DataFrame):
     """Страница с обзором всех программ"""
     st.header("📊 Обзор программ")
     
     # Переключатель для отображения только активных программ
     show_active_only = st.toggle("Показывать только активные программы", value=False) # value=False по умолчанию
+    
+    # Переключатель для фильтрации программ к рефакторингу
+    show_refactor_only = st.toggle("К рефакторингу", value=False)
 
     df_filtered = df.copy() # Работаем с копией, чтобы не изменять оригинальный df для других частей, если понадобится
     active_card_ids_list = None # Список ID карточек для фильтрации, None по умолчанию
 
     # Фильтрация DataFrame если переключатель включен
-    if show_active_only:
-        active_program_names = get_active_programs()
-        if active_program_names:
+    if show_active_only or show_refactor_only:
+        programs_to_filter = []
+        
+        if show_active_only:
+            active_program_names = get_active_programs()
+            programs_to_filter.extend(active_program_names)
+            
+        if show_refactor_only:
+            refactor_program_names = get_refactor_programs()
+            if show_active_only:
+                # Если оба toggle включены, берем пересечение
+                programs_to_filter = list(set(programs_to_filter) & set(refactor_program_names))
+            else:
+                programs_to_filter = refactor_program_names
+                
+        if programs_to_filter:
             if "program_name" in df_filtered.columns:
-                df_filtered = df_filtered[df_filtered["program_name"].isin(active_program_names)].copy()
+                df_filtered = df_filtered[df_filtered["program_name"].isin(programs_to_filter)].copy()
                 # Собираем ID карточек из отфильтрованного df_filtered
                 if "card_ids" in df_filtered.columns and not df_filtered.empty:
                     all_card_ids_from_active = []
@@ -237,36 +267,14 @@ def page_overview(df: pd.DataFrame):
                         # Если card_ids есть, но после обработки список пуст (например, все были NaN)
                         active_card_ids_list = [] # Пустой список, чтобы функции в metrics.py это обработали
             else:
-                st.warning("Столбец 'program_name' не найден в данных для фильтрации по активным программам.")
+                st.warning("Столбец 'program_name' не найден в данных для фильтрации.")
         elif df is not None and not df.empty:
-             st.info("Нет активных программ для отображения или не удалось получить список активных программ.")
+             st.info("Нет программ для отображения по выбранным фильтрам.")
              # df_filtered = pd.DataFrame() # Если нужно полностью очистить данные
 
     # Используем df_filtered далее для всех отображений
     # Вместо оригинального df
     
-    # Добавляем краткое описание
-    with st.expander("ℹ️ О дашборде", expanded=False):
-        st.markdown("""
-        ### Дашборд качества курсов
-        
-        Этот дашборд помогает анализировать качество учебных материалов на всех уровнях:
-        - **Программы**: Общий обзор всех программ
-        - **Модули**: Детализация по модулям выбранной программы
-        - **Уроки**: Анализ уроков в выбранном модуле
-        - **Группы заданий (ГЗ)**: Детализация по группам заданий в уроке
-        - **Карточки**: Подробный анализ отдельных заданий
-        
-        Используйте фильтры в боковой панели для навигации по уровням.
-        
-        **Ключевые метрики**:
-        - **Успешность**: Процент успешных попыток решения заданий
-        - **Успешность с первой попытки**: Процент заданий, решенных с первой попытки
-        - **Жалобы**: Процент заданий, на которые поступили жалобы
-        - **Дискриминативность**: Показатель способности задания различать знающих/незнающих студентов
-        - **Риск**: Комплексный показатель проблемности задания (выше = хуже)
-        - **Время**: Среднее время, затрачиваемое на выполнение задания
-        """)
     
     if df_filtered is None or df_filtered.empty:
         st.warning("Нет данных для отображения.")
@@ -442,12 +450,89 @@ def page_overview(df: pd.DataFrame):
     
     with col2:
         # Статусы карточек из таблицы card_status
-        # Временно комментируем, так как 'status' отсутствует в mv_program_stats
-        # if 'status' in df_filtered.columns:
-        #     display_status_chart(df_filtered, "cards_count") # Используем cards_count вместо card_id для агрегированных данных
-        # else:
-        #     st.info("Данные о статусах карточек недоступны для этого уровня обзора.")
-        pass # Оставляем колонку пустой или добавим другую диаграмму позже
+        st.subheader("📊 Статусы карточек")
+        
+        try:
+            engine = core.get_engine()
+            
+            # Определяем, какие карточки показывать
+            if show_refactor_only:
+                # Получаем программы к рефакторингу
+                refactor_program_names = get_refactor_programs()
+                if refactor_program_names:
+                    # Получаем program_id для этих программ
+                    program_name_placeholders = ", ".join([f":program_name_{i}" for i in range(len(refactor_program_names))])
+                    params_program_ids = {f"program_name_{i}": name for i, name in enumerate(refactor_program_names)}
+                    
+                    program_ids_query = text(f"""
+                        SELECT program_id 
+                        FROM program_ids 
+                        WHERE program_name IN ({program_name_placeholders})
+                    """)
+                    
+                    df_program_ids = pd.read_sql(program_ids_query, engine, params=params_program_ids)
+                    
+                    if not df_program_ids.empty and "program_id" in df_program_ids.columns:
+                        program_ids_list = df_program_ids["program_id"].dropna().unique().tolist()
+                        
+                        # Получаем все card_id для этих программ
+                        program_id_placeholders = ", ".join([f":program_id_{i}" for i in range(len(program_ids_list))])
+                        params_card_ids = {f"program_id_{i}": pid for i, pid in enumerate(program_ids_list)}
+                        
+                        cards_query = text(f"""
+                            SELECT DISTINCT card_id 
+                            FROM cards_structure 
+                            WHERE program_id IN ({program_id_placeholders})
+                        """)
+                        
+                        df_card_ids = pd.read_sql(cards_query, engine, params=params_card_ids)
+                        
+                        if not df_card_ids.empty and "card_id" in df_card_ids.columns:
+                            card_ids_list = df_card_ids["card_id"].dropna().unique().tolist()
+                            
+                            # Получаем статусы карточек
+                            df_statuses = core.get_fresh_card_statuses(engine, card_ids_list)
+                            if not df_statuses.empty and "status" in df_statuses.columns:
+                                display_status_chart(df_statuses)
+                            else:
+                                st.info("Не удалось получить статусы карточек.")
+                        else:
+                            st.info("Не найдено карточек для программ к рефакторингу.")
+                    else:
+                        st.info("Не найдено программ к рефакторингу.")
+                else:
+                    st.info("Нет программ, отмеченных к рефакторингу.")
+            else:
+                # Показываем все карточки или карточки активных программ
+                if active_card_ids_list is not None:
+                    # Если есть фильтр по активным программам
+                    if active_card_ids_list:  # Если список не пустой
+                        df_statuses = core.get_fresh_card_statuses(engine, active_card_ids_list)
+                        if not df_statuses.empty and "status" in df_statuses.columns:
+                            display_status_chart(df_statuses)
+                        else:
+                            st.info("Не удалось получить статусы карточек для активных программ.")
+                    else:
+                        st.info("Нет карточек в активных программах.")
+                else:
+                    # Показываем все карточки без фильтрации
+                    all_cards_query = text("SELECT DISTINCT card_id FROM cards_structure")
+                    df_all_cards = pd.read_sql(all_cards_query, engine)
+                    
+                    if not df_all_cards.empty and "card_id" in df_all_cards.columns:
+                        all_card_ids = df_all_cards["card_id"].dropna().unique().tolist()
+                        
+                        # Получаем статусы всех карточек
+                        df_statuses = core.get_fresh_card_statuses(engine, all_card_ids)
+                        if not df_statuses.empty and "status" in df_statuses.columns:
+                            display_status_chart(df_statuses)
+                        else:
+                            st.info("Не удалось получить статусы карточек.")
+                    else:
+                        st.info("Не найдено карточек в базе данных.")
+                        
+        except Exception as e:
+            st.error(f"Ошибка при загрузке статусов карточек: {e}")
     
     # Топ программ по уровню риска
     df_for_chart = df_filtered.copy()

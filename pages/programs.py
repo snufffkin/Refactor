@@ -36,17 +36,17 @@ def page_programs(df: pd.DataFrame):
             conn = psycopg2.connect(dsn)
             cur = conn.cursor()
             cur.execute(
-                "SELECT program_id, program_active_status FROM program_ids WHERE program_name = %s",
+                "SELECT program_id, program_active_status, program_refactor_status FROM program_ids WHERE program_name = %s",
                 (program_name_to_find,)
             )
             result = cur.fetchone()
             cur.close()
             if result:
-                return result[0], result[1] # program_id, program_active_status
-            return None, None
+                return result[0], result[1], result[2] # program_id, program_active_status, program_refactor_status
+            return None, None, None
         except psycopg2.Error as e:
             st.error(f"Ошибка подключения к БД или выполнения запроса: {e}")
-            return None, None
+            return None, None, None
         finally:
             if conn:
                 conn.close()
@@ -81,18 +81,21 @@ def page_programs(df: pd.DataFrame):
         return 
     
     # Получаем статус программы
-    program_id, program_active_status = get_program_status(prog_name)
+    program_id, program_active_status, program_refactor_status = get_program_status(prog_name)
 
-    # Отображаем значок статуса программы
-    if program_active_status is not None:
-        if program_active_status:
-            st.badge("Программа активна", icon=":material/check_circle:", color="green")
-        else:
-            st.badge("Программа не активна", icon=":material/cancel:", color="red")
-    else:
-        # Если статус не удалось получить, можно вывести сообщение или ничего не делать
-        # st.caption("Статус программы не определен")
-        pass # Не выводим ничего, если статус не получен
+    # Отображаем статусы программы в одну строку
+    status_cols = st.columns([1, 1, 3])  # Создаем колонки для статусов
+    
+    with status_cols[0]:
+        if program_active_status is not None:
+            if program_active_status:
+                st.badge("Программа активна", icon=":material/check_circle:", color="green")
+            else:
+                st.badge("Программа не активна", icon=":material/cancel:", color="red")
+    
+    with status_cols[1]:
+        if program_refactor_status is not None and program_refactor_status:
+            st.badge("К рефактору", icon=":material/build:", color="orange")
 
     # Применяем фильтр программы к уже переименованному df
     df_prog = df[df["program_name"] == prog_name].copy() # Используем program_name из mv_module_stats
