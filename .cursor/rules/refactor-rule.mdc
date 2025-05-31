@@ -1,0 +1,17 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Always answer in Russian. 
+Please edit files in small pieces. 
+Use mcp context7 to obtain relevant documentation on the libraries used. 
+Use mcp consistent thinking.
+
+
+About working with the database:
+- To find out the structure of the database, study the file db_schema.md
+- To study the contents of the database if necessary, use mcp supabase. 
+
+
+- To connect directly to the database in the code, use the get_cloud_dsn() function from the db_config.py file.

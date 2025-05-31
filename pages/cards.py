@@ -12,6 +12,8 @@ from sqlalchemy import text
 import os
 import requests
 from urllib.parse import quote
+import io
+from datetime import datetime
 
 import core
 from components.utils import create_hierarchical_header, add_gz_links, add_card_links
@@ -141,6 +143,437 @@ def display_card_details(card_data):
     
     # Добавляем прямую ссылку на скриншот
     st.markdown(f"[🔗 Открыть скриншот в новом окне]({screenshot_url})")
+
+def display_export_field_selector():
+    """
+    Отображает интерфейс для выбора полей экспорта
+    
+    Returns:
+        dict: Словарь с выбранными индивидуальными полями
+    """
+    # Определяем все доступные поля по группам
+    field_groups = {
+        'basic': {
+            'title': '📋 Основная информация',
+            'fields': {
+                'card_id': 'ID карточки',
+                'card_type': 'Тип карточки',
+                'program_name': 'Название программы',
+                'module_name': 'Название модуля',
+                'lesson_name': 'Название урока',
+                'gz_name': 'Название группы заданий',
+                'card_order': 'Порядковый номер карточки',
+                'card_url': 'URL карточки в редакторе',
+                'status': 'Статус карточки'
+            }
+        },
+        'metrics': {
+            'title': '📊 Ключевые метрики',
+            'fields': {
+                'success_rate': 'Общая успешность',
+                'first_try_success_rate': 'Успешность с первой попытки',
+                'success_diff': 'Разница в успешности',
+                'discrimination_avg': 'Индекс дискриминативности',
+                'complaint_rate': 'Доля жалоб',
+                'complaints_total': 'Количество жалоб',
+                'attempted_share': 'Доля пытавшихся',
+                'total_attempts': 'Общее количество попыток',
+                'time_median': 'Медианное время (мин)',
+                'trickiness_level': 'Уровень подлости'
+            }
+        },
+        'risk': {
+            'title': '⚠️ Компоненты риска',
+            'fields': {
+                'risk_discrimination': 'Риск по дискриминативности',
+                'risk_success_rate': 'Риск по успешности',
+                'risk_trickiness': 'Риск по подлости',
+                'risk_complaints': 'Риск по жалобам',
+                'risk_attempted_share': 'Риск по доле пытавшихся',
+                'weighted_avg_risk': 'Взвешенный средний риск',
+                'max_risk': 'Максимальный риск',
+                'confidence_factor': 'Коэффициент доверия',
+                'final_risk': 'Итоговый риск'
+            }
+        },
+        'additional': {
+            'title': '🔗 Дополнительные данные',
+            'fields': {
+                'card_public_url': 'Публичная ссылка на карточку',
+                'screenshot_url': 'Ссылка на скриншот',
+                'embedding': 'Векторное представление (embedding)'
+            }
+        },
+        'timestamps': {
+            'title': '🕒 Временные метки',
+            'fields': {
+                'updated_at': 'Дата последнего обновления',
+                'updated_by': 'Кем обновлено',
+                'export_timestamp': 'Время экспорта'
+            }
+        },
+        'complaints_text': {
+            'title': '💬 Тексты жалоб',
+            'fields': {
+                'complaints_text': 'Полные тексты жалоб'
+            }
+        }
+    }
+    
+    # Инициализируем состояние по умолчанию для всех полей
+    force_update_key = st.session_state.get('export_force_update', 0)
+    
+    # Создаем список всех полей
+    all_field_keys = []
+    for group_key, group_data in field_groups.items():
+        for field_key in group_data['fields'].keys():
+            all_field_keys.append(f"field_{field_key}")
+    
+    # Устанавливаем значения по умолчанию, если их нет в session_state
+    for field_key in all_field_keys:
+        if field_key not in st.session_state:
+            st.session_state[field_key] = True
+    
+    st.subheader("🔧 Настройки экспорта")
+    
+    # Глобальные кнопки управления
+    col_global1, col_global2, col_global3 = st.columns([1, 1, 2])
+    with col_global1:
+        if st.button("✅ Выбрать все поля", key="select_all_fields_global"):
+            st.session_state.export_force_update = force_update_key + 1
+            for field_key in all_field_keys:
+                st.session_state[field_key] = True
+            st.rerun()
+    
+    with col_global2:
+        if st.button("❌ Снять все поля", key="deselect_all_fields_global"):
+            st.session_state.export_force_update = force_update_key + 1
+            for field_key in all_field_keys:
+                st.session_state[field_key] = False
+            st.rerun()
+    
+    with col_global3:
+        # Показываем счетчик выбранных полей
+        selected_count = sum(1 for field_key in all_field_keys if st.session_state.get(field_key, True))
+        st.info(f"Выбрано полей: {selected_count}/{len(all_field_keys)}")
+    
+    st.markdown("---")
+    
+    # Создаем группы полей
+    selected_fields = {}
+    
+    for group_key, group_data in field_groups.items():
+        with st.expander(group_data['title'], expanded=False):
+            # Кнопки для группы
+            col_group1, col_group2, col_group3 = st.columns([1, 1, 2])
+            
+            group_field_keys = [f"field_{field_key}" for field_key in group_data['fields'].keys()]
+            
+            with col_group1:
+                if st.button(f"✅ Все", key=f"select_group_{group_key}"):
+                    st.session_state.export_force_update = force_update_key + 1
+                    for field_key in group_field_keys:
+                        st.session_state[field_key] = True
+                    st.rerun()
+            
+            with col_group2:
+                if st.button(f"❌ Ничего", key=f"deselect_group_{group_key}"):
+                    st.session_state.export_force_update = force_update_key + 1
+                    for field_key in group_field_keys:
+                        st.session_state[field_key] = False
+                    st.rerun()
+            
+            with col_group3:
+                # Показываем счетчик для группы
+                group_selected_count = sum(1 for field_key in group_field_keys if st.session_state.get(field_key, True))
+                st.caption(f"Выбрано: {group_selected_count}/{len(group_field_keys)}")
+            
+            # Чекбоксы для полей в группе
+            for field_key, field_description in group_data['fields'].items():
+                session_key = f"field_{field_key}"
+                checkbox_key = f"{session_key}_{force_update_key}"
+                
+                selected = st.checkbox(
+                    field_description,
+                    value=st.session_state.get(session_key, True),
+                    key=checkbox_key,
+                    help=f"Включить поле '{field_key}' в экспорт"
+                )
+                
+                selected_fields[field_key] = selected
+                st.session_state[session_key] = selected
+    
+    return selected_fields
+
+def prepare_card_data_for_csv(card_data, engine, field_selection=None):
+    """
+    Подготавливает данные карточки для экспорта в CSV
+    
+    Args:
+        card_data: Series с данными карточки
+        engine: SQLAlchemy engine для подключения к БД
+        field_selection: dict с выбранными индивидуальными полями для экспорта
+        
+    Returns:
+        pd.DataFrame: DataFrame с данными для экспорта
+    """
+    # Если не указан выбор полей, включаем все поля по умолчанию
+    if field_selection is None:
+        # Все доступные поля по умолчанию
+        field_selection = {
+            'card_id': True, 'card_type': True, 'program_name': True, 'module_name': True,
+            'lesson_name': True, 'gz_name': True, 'card_order': True, 'card_url': True,
+            'status': True, 'success_rate': True, 'first_try_success_rate': True,
+            'success_diff': True, 'discrimination_avg': True, 'complaint_rate': True,
+            'complaints_total': True, 'attempted_share': True, 'total_attempts': True,
+            'time_median': True, 'trickiness_level': True, 'risk_discrimination': True,
+            'risk_success_rate': True, 'risk_trickiness': True, 'risk_complaints': True,
+            'risk_attempted_share': True, 'weighted_avg_risk': True, 'max_risk': True,
+            'confidence_factor': True, 'final_risk': True, 'card_public_url': True,
+            'screenshot_url': True, 'embedding': True, 'updated_at': True,
+            'updated_by': True, 'export_timestamp': True, 'complaints_text': True
+        }
+    
+    # Получаем конфигурацию для расчета компонентов риска
+    config = core.get_config()
+    card_dict = card_data.to_dict()
+    
+    # Рассчитываем компоненты риска только если нужны
+    risk_discr = risk_success = risk_trickiness = risk_complaints = risk_attempted = np.nan
+    weighted_avg_risk = max_risk = confidence_factor_val = final_risk_val = np.nan
+    
+    if field_selection.get('risk', False):
+        # Рассчитываем компоненты риска
+        d_avg = card_data.get("discrimination_avg")
+        s_rate = card_data.get("success_rate")
+        
+        risk_discr = core.discrimination_risk_score(d_avg) if pd.notna(d_avg) else np.nan
+        risk_success = core.success_rate_risk_score(s_rate) if pd.notna(s_rate) else np.nan
+        risk_trickiness = core.trickiness_risk_score(card_dict)
+        risk_complaints = core.complaint_risk_score(card_dict)
+        risk_attempted = core.attempted_share_risk_score(card_data.get("attempted_share")) if pd.notna(card_data.get("attempted_share")) else np.nan
+        
+        # Рассчитываем взвешенные риски
+        WEIGHT_DISCRIMINATION = config["weights"]["discrimination"]
+        WEIGHT_SUCCESS_RATE = config["weights"]["success_rate"]
+        WEIGHT_TRICKINESS = config["weights"].get("trickiness", 0.15)
+        WEIGHT_COMPLAINT_RATE = config["weights"]["complaint_rate"]
+        WEIGHT_ATTEMPTED = config["weights"]["attempted"]
+        
+        # Вычисляем взвешенное среднее
+        weighted_sum = 0
+        total_weight = 0
+        if pd.notna(risk_discr): weighted_sum += WEIGHT_DISCRIMINATION * risk_discr; total_weight += WEIGHT_DISCRIMINATION
+        if pd.notna(risk_success): weighted_sum += WEIGHT_SUCCESS_RATE * risk_success; total_weight += WEIGHT_SUCCESS_RATE
+        if pd.notna(risk_trickiness): weighted_sum += WEIGHT_TRICKINESS * risk_trickiness; total_weight += WEIGHT_TRICKINESS
+        if pd.notna(risk_complaints): weighted_sum += WEIGHT_COMPLAINT_RATE * risk_complaints; total_weight += WEIGHT_COMPLAINT_RATE
+        if pd.notna(risk_attempted): weighted_sum += WEIGHT_ATTEMPTED * risk_attempted; total_weight += WEIGHT_ATTEMPTED
+        
+        weighted_avg_risk = (weighted_sum / total_weight) if total_weight > 0 else np.nan
+        
+        # Определяем максимальный риск
+        all_risks_list = [r for r in [risk_discr, risk_success, risk_trickiness, risk_complaints, risk_attempted] if pd.notna(r)]
+        max_risk = np.max(all_risks_list) if all_risks_list else np.nan
+        
+        # Рассчитываем итоговый риск
+        ta_for_confidence = card_data.get("total_attempts")
+        if pd.notna(ta_for_confidence):
+            significance_threshold = config["stats"]["significance_threshold"]
+            if significance_threshold > 0:
+                confidence_factor_val = min(ta_for_confidence / significance_threshold, 1.0)
+            else:
+                confidence_factor_val = 1.0
+        
+        final_risk_val = card_data.get('risk', np.nan)
+    
+    # Безопасное получение complaints_total
+    ct_raw = card_data.get('complaints_total')
+    if pd.notna(ct_raw):
+        complaints_total = ct_raw
+    else:
+        cr_for_calc = card_data.get('complaint_rate')
+        ta_for_calc = card_data.get('total_attempts')
+        if pd.notna(cr_for_calc) and pd.notna(ta_for_calc):
+            complaints_total = cr_for_calc * ta_for_calc
+        else:
+            complaints_total = np.nan
+    
+    # Получаем дополнительные данные если нужны
+    screenshot_url = ""
+    embedding_data = None
+    
+    if field_selection.get('screenshot_url', False) or field_selection.get('embedding', False):
+        card_id_for_additional = int(card_data.get("card_id", 0))
+        
+        if field_selection.get('screenshot_url', False):
+            screenshot_url = get_screenshot_url(card_id_for_additional)
+        
+        if field_selection.get('embedding', False):
+            # Получаем embedding из базы данных
+            try:
+                with engine.connect() as conn:
+                    embedding_query = text("""
+                        SELECT embedding 
+                        FROM cards_content 
+                        WHERE card_id = :card_id
+                    """)
+                    result = conn.execute(embedding_query, {"card_id": card_id_for_additional})
+                    row = result.fetchone()
+                    if row and row[0] is not None:
+                        # Конвертируем vector в строку для CSV
+                        try:
+                            vector_str = str(row[0])
+                            if vector_str.startswith('[') and vector_str.endswith(']'):
+                                embedding_data = vector_str[1:-1]  # Убираем [ и ]
+                            else:
+                                embedding_data = vector_str
+                        except Exception as vector_error:
+                            print(f"Ошибка при обработке вектора: {vector_error}")
+                            embedding_data = str(row[0])
+            except Exception as e:
+                print(f"Ошибка при получении embedding для карточки {card_id_for_additional}: {str(e)}")
+                embedding_data = None
+    
+    # Подготавливаем данные для экспорта на основе выбранных полей
+    export_data = {}
+    
+    # Основная информация
+    if field_selection.get('card_id', False):
+        export_data['card_id'] = int(card_data.get("card_id", 0))
+    if field_selection.get('card_type', False):
+        export_data['card_type'] = card_data.get("card_type", "")
+    if field_selection.get('program_name', False):
+        export_data['program_name'] = card_data.get("program_name", "")
+    if field_selection.get('module_name', False):
+        export_data['module_name'] = card_data.get("module_name", "")
+    if field_selection.get('lesson_name', False):
+        export_data['lesson_name'] = card_data.get("lesson_name", "")
+    if field_selection.get('gz_name', False):
+        export_data['gz_name'] = card_data.get("gz_name", "")
+    if field_selection.get('card_order', False):
+        export_data['card_order'] = card_data.get("card_order", "")
+    if field_selection.get('card_url', False):
+        export_data['card_url'] = card_data.get("card_url", "")
+    if field_selection.get('status', False):
+        export_data['status'] = card_data.get("status", "")
+    
+    # Основные метрики
+    if field_selection.get('success_rate', False):
+        export_data['success_rate'] = card_data.get("success_rate")
+    if field_selection.get('first_try_success_rate', False):
+        export_data['first_try_success_rate'] = card_data.get("first_try_success_rate")
+    if field_selection.get('success_diff', False):
+        export_data['success_diff'] = card_data.get("success_diff")
+    if field_selection.get('discrimination_avg', False):
+        export_data['discrimination_avg'] = card_data.get("discrimination_avg")
+    if field_selection.get('complaint_rate', False):
+        export_data['complaint_rate'] = card_data.get("complaint_rate")
+    if field_selection.get('complaints_total', False):
+        export_data['complaints_total'] = complaints_total
+    if field_selection.get('attempted_share', False):
+        export_data['attempted_share'] = card_data.get("attempted_share")
+    if field_selection.get('total_attempts', False):
+        export_data['total_attempts'] = card_data.get("total_attempts")
+    if field_selection.get('time_median', False):
+        export_data['time_median'] = card_data.get("time_median")
+    if field_selection.get('trickiness_level', False):
+        export_data['trickiness_level'] = card_data.get("trickiness_level", 0)
+    
+    # Компоненты риска
+    if field_selection.get('risk_discrimination', False):
+        export_data['risk_discrimination'] = risk_discr
+    if field_selection.get('risk_success_rate', False):
+        export_data['risk_success_rate'] = risk_success
+    if field_selection.get('risk_trickiness', False):
+        export_data['risk_trickiness'] = risk_trickiness
+    if field_selection.get('risk_complaints', False):
+        export_data['risk_complaints'] = risk_complaints
+    if field_selection.get('risk_attempted_share', False):
+        export_data['risk_attempted_share'] = risk_attempted
+    if field_selection.get('weighted_avg_risk', False):
+        export_data['weighted_avg_risk'] = weighted_avg_risk
+    if field_selection.get('max_risk', False):
+        export_data['max_risk'] = max_risk
+    if field_selection.get('confidence_factor', False):
+        export_data['confidence_factor'] = confidence_factor_val
+    if field_selection.get('final_risk', False):
+        export_data['final_risk'] = final_risk_val
+    
+    # Дополнительные данные
+    if field_selection.get('card_public_url', False):
+        export_data['card_public_url'] = card_data.get("card_public_url", "")
+    if field_selection.get('screenshot_url', False):
+        export_data['screenshot_url'] = screenshot_url
+    if field_selection.get('embedding', False):
+        export_data['embedding'] = embedding_data
+    
+    # Временные метки
+    if field_selection.get('updated_at', False):
+        export_data['updated_at'] = card_data.get("updated_at", "")
+    if field_selection.get('updated_by', False):
+        export_data['updated_by'] = card_data.get("updated_by", "")
+    if field_selection.get('export_timestamp', False):
+        export_data['export_timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Тексты жалоб
+    if field_selection.get('complaints_text', False):
+        complaints_text = card_data.get("complaints_text", "")
+        export_data['complaints_text'] = complaints_text.strip() if pd.notna(complaints_text) else ""
+    
+    # Создаем DataFrame
+    df_export = pd.DataFrame([export_data])
+    
+    return df_export
+
+def display_csv_download_button(card_data, engine, field_selection):
+    """
+    Отображает кнопку для скачивания данных карточки в CSV формате
+    
+    Args:
+        card_data: Series с данными карточки
+        engine: SQLAlchemy engine для подключения к БД
+        field_selection: dict с выбранными индивидуальными полями для экспорта
+    """
+    try:
+        # Подготавливаем данные для экспорта
+        df_export = prepare_card_data_for_csv(card_data, engine, field_selection)
+        
+        # Проверяем, есть ли данные для экспорта
+        if df_export.empty or df_export.shape[1] == 0:
+            st.warning("Выберите хотя бы одно поле для экспорта")
+            return
+        
+        # Конвертируем в CSV
+        csv_buffer = io.StringIO()
+        df_export.to_csv(csv_buffer, index=False, encoding='utf-8-sig')
+        csv_data = csv_buffer.getvalue()
+        
+        # Формируем имя файла
+        card_id = int(card_data.get("card_id", 0))
+        selected_fields = [k for k, v in field_selection.items() if v]
+        field_count = len(selected_fields)
+        
+        # Сокращаем имя файла, чтобы оно не было слишком длинным
+        if field_count <= 5:
+            fields_suffix = "_".join(selected_fields[:5])
+        else:
+            fields_suffix = f"{field_count}_fields"
+        
+        filename = f"card_{card_id}_{fields_suffix}.csv"
+        
+        # Отображаем кнопку скачивания
+        st.download_button(
+            label=f"📥 Скачать выбранные данные ({field_count} полей)",
+            data=csv_data,
+            file_name=filename,
+            mime="text/csv",
+            help=f"Экспортировать {field_count} выбранных полей"
+        )
+        
+    except Exception as e:
+        st.error(f"Ошибка при подготовке данных для экспорта: {str(e)}")
+
+
 
 def display_course_links(card_id, engine, card_df):
     """
@@ -1309,3 +1742,59 @@ def page_cards(df_card_details: pd.DataFrame, df_structure: pd.DataFrame, eng):
             label="Медианное время на карточку (мин)",
             value=f"{card_data['time_median']:.1f}"
         )
+    
+    # Добавляем разделитель
+    st.markdown("---")
+    
+    # Добавляем интерфейс экспорта данных в конце страницы
+    st.markdown("## 📥 Экспорт данных карточки")
+    
+    # Отображаем селектор полей
+    field_selection = display_export_field_selector()
+    
+    # Создаем колонки для кнопки и информации
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        display_csv_download_button(card_data, eng, field_selection)
+    with col2:
+        # Показываем информацию о выбранных полях
+        selected_fields = [k for k, v in field_selection.items() if v]
+        if selected_fields:
+            field_count = len(selected_fields)
+            
+            # Группируем поля по категориям для отображения
+            field_groups = {
+                'basic': ['card_id', 'card_type', 'program_name', 'module_name', 'lesson_name', 'gz_name', 'card_order', 'card_url', 'status'],
+                'metrics': ['success_rate', 'first_try_success_rate', 'success_diff', 'discrimination_avg', 'complaint_rate', 'complaints_total', 'attempted_share', 'total_attempts', 'time_median', 'trickiness_level'],
+                'risk': ['risk_discrimination', 'risk_success_rate', 'risk_trickiness', 'risk_complaints', 'risk_attempted_share', 'weighted_avg_risk', 'max_risk', 'confidence_factor', 'final_risk'],
+                'additional': ['card_public_url', 'screenshot_url', 'embedding'],
+                'timestamps': ['updated_at', 'updated_by', 'export_timestamp'],
+                'complaints_text': ['complaints_text']
+            }
+            
+            group_names = {
+                'basic': '📋 Основная информация',
+                'metrics': '📊 Ключевые метрики', 
+                'risk': '⚠️ Компоненты риска',
+                'additional': '🔗 Дополнительные данные',
+                'timestamps': '🕒 Временные метки',
+                'complaints_text': '💬 Тексты жалоб'
+            }
+            
+            selected_by_group = {}
+            for group, fields in field_groups.items():
+                selected_in_group = [f for f in fields if f in selected_fields]
+                if selected_in_group:
+                    selected_by_group[group] = selected_in_group
+            
+            if selected_by_group:
+                info_text = f"**Выбрано {field_count} полей для экспорта:**\n\n"
+                for group, fields in selected_by_group.items():
+                    info_text += f"**{group_names[group]}:** {len(fields)} полей\n"
+                    info_text += "• " + ", ".join(fields) + "\n\n"
+                
+                st.info(info_text, icon="ℹ️")
+            else:
+                st.info(f"**Выбрано {field_count} кастомных полей для экспорта**", icon="ℹ️")
+        else:
+            st.warning("Не выбрано ни одного поля для экспорта", icon="⚠️")

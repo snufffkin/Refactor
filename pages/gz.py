@@ -10,6 +10,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
 import urllib.parse as ul
+import io
+from datetime import datetime
 
 import core
 from components.utils import create_hierarchical_header, display_clickable_items, add_gz_links
@@ -827,74 +829,517 @@ def page_gz(df_cards_input: pd.DataFrame, eng, create_link_fn=None):
         # Отображаем оставшиеся карточки при большом числе
         if len(unique_tricky_cards_for_buttons_list) > 12:
             st.info(f"И еще {len(unique_tricky_cards_for_buttons_list) - 12} карточек...")
+    
+    # Добавляем разделитель
+    st.markdown("---")
+    
+    # Добавляем интерфейс экспорта данных ГЗ в конце страницы
+    st.markdown("## 📥 Экспорт данных группы заданий")
+    
+    # Отображаем селектор полей
+    field_selection_gz = display_export_field_selector_gz()
+    
+    # Создаем колонки для кнопки и информации
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        display_csv_download_button_gz(df_cards, eng, field_selection_gz, gz_name)
+    with col2:
+        # Показываем информацию о выбранных полях
+        selected_fields = [k for k, v in field_selection_gz.items() if v]
+        if selected_fields:
+            field_count = len(selected_fields)
+            cards_count = len(df_cards)
+            
+            # Группируем поля по категориям для отображения
+            field_groups_display = {
+                'basic': ['card_id', 'card_type', 'program_name', 'module_name', 'lesson_name', 'gz_name', 'card_order', 'card_url', 'status'],
+                'metrics': ['success_rate', 'first_try_success_rate', 'success_diff', 'discrimination_avg', 'complaint_rate', 'complaints_total', 'attempted_share', 'total_attempts', 'time_median', 'trickiness_level'],
+                'risk': ['risk_discrimination', 'risk_success_rate', 'risk_trickiness', 'risk_complaints', 'risk_attempted_share', 'weighted_avg_risk', 'max_risk', 'confidence_factor', 'final_risk'],
+                'additional': ['card_public_url', 'screenshot_url', 'embedding'],
+                'timestamps': ['updated_at', 'updated_by', 'export_timestamp'],
+                'complaints_text': ['complaints_text']
+            }
+            
+            group_names_display = {
+                'basic': '📋 Основная информация',
+                'metrics': '📊 Ключевые метрики', 
+                'risk': '⚠️ Компоненты риска',
+                'additional': '🔗 Дополнительные данные',
+                'timestamps': '🕒 Временные метки',
+                'complaints_text': '💬 Тексты жалоб'
+            }
+            
+            selected_by_group = {}
+            for group, fields in field_groups_display.items():
+                selected_in_group = [f for f in fields if f in selected_fields]
+                if selected_in_group:
+                    selected_by_group[group] = selected_in_group
+            
+            if selected_by_group:
+                info_text = f"**Выбрано {field_count} полей для экспорта {cards_count} карточек:**\n\n"
+                for group, fields in selected_by_group.items():
+                    info_text += f"**{group_names_display[group]}:** {len(fields)} полей\n"
+                    info_text += "• " + ", ".join(fields) + "\n\n"
+                
+                st.info(info_text, icon="ℹ️")
+            else:
+                st.info(f"**Выбрано {field_count} кастомных полей для экспорта {cards_count} карточек**", icon="ℹ️")
+        else:
+            st.warning("Не выбрано ни одного поля для экспорта", icon="⚠️")
 
-def _page_gz_inline(df: pd.DataFrame):
-    """Встроенная версия страницы групп заданий для отображения на странице урока"""
-    # Фильтруем данные по выбранной программе, модулю и уроку
-    df_lesson = core.apply_filters(df, ["program", "module", "lesson"])
+def display_export_field_selector_gz():
+    """
+    Отображает интерфейс для выбора полей экспорта для ГЗ
     
-    # Проверка наличия данных после фильтрации
-    if df_lesson.empty:
-        lesson_name = st.session_state.get('filter_lesson') or '—'
-        st.warning(f"Нет данных для урока '{lesson_name}'")
-        return
+    Returns:
+        dict: Словарь с выбранными индивидуальными полями
+    """
+    # Определяем все доступные поля по группам
+    field_groups = {
+        'basic': {
+            'title': '📋 Основная информация',
+            'fields': {
+                'card_id': 'ID карточки',
+                'card_type': 'Тип карточки',
+                'program_name': 'Название программы',
+                'module_name': 'Название модуля', 
+                'lesson_name': 'Название урока',
+                'gz_name': 'Название группы заданий',
+                'card_order': 'Порядковый номер карточки',
+                'card_url': 'URL карточки в редакторе',
+                'status': 'Статус карточки'
+            }
+        },
+        'metrics': {
+            'title': '📊 Ключевые метрики',
+            'fields': {
+                'success_rate': 'Общая успешность',
+                'first_try_success_rate': 'Успешность с первой попытки',
+                'success_diff': 'Разница в успешности',
+                'discrimination_avg': 'Индекс дискриминативности',
+                'complaint_rate': 'Доля жалоб',
+                'complaints_total': 'Количество жалоб',
+                'attempted_share': 'Доля пытавшихся',
+                'total_attempts': 'Общее количество попыток',
+                'time_median': 'Медианное время (мин)',
+                'trickiness_level': 'Уровень подлости'
+            }
+        },
+        'risk': {
+            'title': '⚠️ Компоненты риска',
+            'fields': {
+                'risk_discrimination': 'Риск по дискриминативности',
+                'risk_success_rate': 'Риск по успешности',
+                'risk_trickiness': 'Риск по подлости',
+                'risk_complaints': 'Риск по жалобам',
+                'risk_attempted_share': 'Риск по доле пытавшихся',
+                'weighted_avg_risk': 'Взвешенный средний риск',
+                'max_risk': 'Максимальный риск',
+                'confidence_factor': 'Коэффициент доверия',
+                'final_risk': 'Итоговый риск'
+            }
+        },
+        'additional': {
+            'title': '🔗 Дополнительные данные',
+            'fields': {
+                'card_public_url': 'Публичная ссылка на карточку',
+                'screenshot_url': 'Ссылка на скриншот',
+                'embedding': 'Векторное представление (embedding)'
+            }
+        },
+        'timestamps': {
+            'title': '🕒 Временные метки',
+            'fields': {
+                'updated_at': 'Дата последнего обновления',
+                'updated_by': 'Кем обновлено',
+                'export_timestamp': 'Время экспорта'
+            }
+        },
+        'complaints_text': {
+            'title': '💬 Тексты жалоб',
+            'fields': {
+                'complaints_text': 'Полные тексты жалоб'
+            }
+        }
+    }
     
-    # Заголовок
-    st.subheader("🧩 Группы заданий выбранного урока")
+    # Инициализируем состояние по умолчанию для всех полей
+    force_update_key = st.session_state.get('export_gz_force_update', 0)
     
-    # Агрегируем данные по группам заданий
-    agg = df_lesson.groupby("gz").agg(
-        risk=("risk", "mean"),
-        success=("success_rate", "mean"),
-        complaints=("complaint_rate", "mean"),
-        cards=("card_id", "nunique")
-    ).reset_index()
+    # Создаем список всех полей
+    all_field_keys = []
+    for group_key, group_data in field_groups.items():
+        for field_key in group_data['fields'].keys():
+            all_field_keys.append(f"gz_field_{field_key}")
     
-    # Добавляем нумерацию для групп заданий
-    agg = agg.sort_values("risk", ascending=False).reset_index(drop=True)
-    agg["gz_num"] = agg.index + 1
+    # Устанавливаем значения по умолчанию, если их нет в session_state
+    for field_key in all_field_keys:
+        if field_key not in st.session_state:
+            st.session_state[field_key] = True
     
-    # Создаем график
-    fig = px.bar(
-        agg,
-        x="gz_num",  # Используем последовательную нумерацию
-        y="risk",
-        color="risk",
-        color_continuous_scale="RdYlGn_r",
-        labels={"gz_num": "Номер группы заданий", "risk": "Риск"},
-        title="Уровень риска по группам заданий",
-        hover_data=["gz", "success", "complaints", "cards"]  # Показываем реальный ID в подсказке
-    )
+    st.subheader("🔧 Настройки экспорта ГЗ")
     
-    # Форматируем подсказки
-    fig.update_traces(
-        hovertemplate="<b>%{customdata[0]}</b><br>" +
-                      "Номер: %{x}<br>" +
-                      "Риск: %{y:.2f}<br>" +
-                      "Успешность: %{customdata[1]:.1%}<br>" +
-                      "Жалобы: %{customdata[2]:.1%}<br>" +
-                      "Карточек: %{customdata[3]}"
-    )
+    # Глобальные кнопки управления
+    col_global1, col_global2, col_global3 = st.columns([1, 1, 2])
+    with col_global1:
+        if st.button("✅ Выбрать все поля", key="select_all_fields_global_gz"):
+            st.session_state.export_gz_force_update = force_update_key + 1
+            for field_key in all_field_keys:
+                st.session_state[field_key] = True
+            st.rerun()
     
-    fig.update_layout(
-        xaxis_tickangle=0  # Убираем наклон, т.к. числа компактны
-    )
+    with col_global2:
+        if st.button("❌ Снять все поля", key="deselect_all_fields_global_gz"):
+            st.session_state.export_gz_force_update = force_update_key + 1
+            for field_key in all_field_keys:
+                st.session_state[field_key] = False
+            st.rerun()
     
-    st.plotly_chart(fig, use_container_width=True)
+    with col_global3:
+        # Показываем счетчик выбранных полей
+        selected_count = sum(1 for field_key in all_field_keys if st.session_state.get(field_key, True))
+        st.info(f"Выбрано полей: {selected_count}/{len(all_field_keys)}")
     
-    # Таблица с группами заданий, добавляем номер для соответствия с графиком
-    table_df = agg[["gz_num", "gz", "risk", "success", "complaints", "cards"]]
-    table_df.columns = ["Номер", "Группа заданий", "Риск", "Успешность", "Жалобы", "Карточек"]
+    st.markdown("---")
     
-    st.dataframe(
-        table_df.style.format({
-            "Риск": "{:.2f}",
-            "Успешность": "{:.1%}",
-            "Жалобы": "{:.1%}"
-        }),
-        use_container_width=True,
-        hide_index=True
-    )
+    # Создаем группы полей
+    selected_fields = {}
     
-    # Список кликабельных групп заданий
-    display_clickable_items(df_lesson, "gz", "gz", metrics=["cards", "risk"])
+    for group_key, group_data in field_groups.items():
+        with st.expander(group_data['title'], expanded=False):
+            # Кнопки для группы
+            col_group1, col_group2, col_group3 = st.columns([1, 1, 2])
+            
+            group_field_keys = [f"gz_field_{field_key}" for field_key in group_data['fields'].keys()]
+            
+            with col_group1:
+                if st.button(f"✅ Все", key=f"select_group_gz_{group_key}"):
+                    st.session_state.export_gz_force_update = force_update_key + 1
+                    for field_key in group_field_keys:
+                        st.session_state[field_key] = True
+                    st.rerun()
+            
+            with col_group2:
+                if st.button(f"❌ Ничего", key=f"deselect_group_gz_{group_key}"):
+                    st.session_state.export_gz_force_update = force_update_key + 1
+                    for field_key in group_field_keys:
+                        st.session_state[field_key] = False
+                    st.rerun()
+            
+            with col_group3:
+                # Показываем счетчик для группы
+                group_selected_count = sum(1 for field_key in group_field_keys if st.session_state.get(field_key, True))
+                st.caption(f"Выбрано: {group_selected_count}/{len(group_field_keys)}")
+            
+            # Чекбоксы для полей в группе
+            for field_key, field_description in group_data['fields'].items():
+                session_key = f"gz_field_{field_key}"
+                checkbox_key = f"{session_key}_{force_update_key}"
+                
+                selected = st.checkbox(
+                    field_description,
+                    value=st.session_state.get(session_key, True),
+                    key=checkbox_key,
+                    help=f"Включить поле '{field_key}' в экспорт"
+                )
+                
+                selected_fields[field_key] = selected
+                st.session_state[session_key] = selected
+    
+    return selected_fields
+
+def get_screenshot_url_gz(card_id):
+    """
+    Формирует URL для скриншота карточки из Yandex Object Storage
+    
+    Args:
+        card_id: ID карточки
+    
+    Returns:
+        str: URL скриншота
+    """
+    return f"https://snufffkin-pics.website.yandexcloud.net/Refactor/image/{card_id}.png"
+
+def prepare_gz_data_for_csv(df_cards, engine, field_selection=None):
+    """
+    Подготавливает данные карточек ГЗ для экспорта в CSV
+    
+    Args:
+        df_cards: DataFrame с данными карточек ГЗ
+        engine: SQLAlchemy engine для подключения к БД
+        field_selection: dict с выбранными индивидуальными полями для экспорта
+        
+    Returns:
+        pd.DataFrame: DataFrame с данными для экспорта
+    """
+    # Если не указан выбор полей, включаем все поля по умолчанию
+    if field_selection is None:
+        field_selection = {
+            'card_id': True, 'card_type': True, 'program_name': True, 'module_name': True,
+            'lesson_name': True, 'gz_name': True, 'card_order': True, 'card_url': True,
+            'status': True, 'success_rate': True, 'first_try_success_rate': True,
+            'success_diff': True, 'discrimination_avg': True, 'complaint_rate': True,
+            'complaints_total': True, 'attempted_share': True, 'total_attempts': True,
+            'time_median': True, 'trickiness_level': True, 'risk_discrimination': True,
+            'risk_success_rate': True, 'risk_trickiness': True, 'risk_complaints': True,
+            'risk_attempted_share': True, 'weighted_avg_risk': True, 'max_risk': True,
+            'confidence_factor': True, 'final_risk': True, 'card_public_url': True,
+            'screenshot_url': True, 'embedding': True, 'updated_at': True,
+            'updated_by': True, 'export_timestamp': True, 'complaints_text': True
+        }
+    
+    if df_cards.empty:
+        return pd.DataFrame()
+    
+    # Получаем конфигурацию для расчета компонентов риска
+    config = core.get_config()
+    
+    # Список для хранения данных экспорта
+    export_data_list = []
+    
+    # Получаем embedding и другие дополнительные данные только если нужны
+    embedding_data_dict = {}
+    if field_selection.get('embedding', False):
+        try:
+            card_ids_for_embedding = df_cards['card_id'].dropna().unique().tolist()
+            if card_ids_for_embedding:
+                with engine.connect() as conn:
+                    from sqlalchemy import text
+                    embedding_query = text("""
+                        SELECT card_id, embedding 
+                        FROM cards_content 
+                        WHERE card_id = ANY(:card_ids)
+                    """)
+                    result = conn.execute(embedding_query, {"card_ids": card_ids_for_embedding})
+                    for row in result:
+                        try:
+                            vector_str = str(row[1])
+                            if vector_str.startswith('[') and vector_str.endswith(']'):
+                                embedding_data_dict[row[0]] = vector_str[1:-1]  # Убираем [ и ]
+                            else:
+                                embedding_data_dict[row[0]] = vector_str
+                        except Exception:
+                            embedding_data_dict[row[0]] = str(row[1])
+        except Exception as e:
+            print(f"Ошибка при получении embedding для ГЗ: {str(e)}")
+    
+    # Обрабатываем каждую карточку
+    for _, card_row in df_cards.iterrows():
+        card_dict = card_row.to_dict()
+        export_data = {}
+        
+        # Рассчитываем компоненты риска только если нужны
+        risk_discr = risk_success = risk_trickiness = risk_complaints = risk_attempted = np.nan
+        weighted_avg_risk = max_risk = confidence_factor_val = final_risk_val = np.nan
+        
+        if any(field_selection.get(f'risk_{comp}', False) for comp in ['discrimination', 'success_rate', 'trickiness', 'complaints', 'attempted_share']) or \
+           any(field_selection.get(f'{comp}', False) for comp in ['weighted_avg_risk', 'max_risk', 'confidence_factor', 'final_risk']):
+            # Рассчитываем компоненты риска
+            d_avg = card_row.get("discrimination_avg")
+            s_rate = card_row.get("success_rate")
+            
+            risk_discr = core.discrimination_risk_score(d_avg) if pd.notna(d_avg) else np.nan
+            risk_success = core.success_rate_risk_score(s_rate) if pd.notna(s_rate) else np.nan
+            risk_trickiness = core.trickiness_risk_score(card_dict)
+            risk_complaints = core.complaint_risk_score(card_dict)
+            risk_attempted = core.attempted_share_risk_score(card_row.get("attempted_share")) if pd.notna(card_row.get("attempted_share")) else np.nan
+            
+            # Рассчитываем взвешенные риски
+            WEIGHT_DISCRIMINATION = config["weights"]["discrimination"]
+            WEIGHT_SUCCESS_RATE = config["weights"]["success_rate"]
+            WEIGHT_TRICKINESS = config["weights"].get("trickiness", 0.15)
+            WEIGHT_COMPLAINT_RATE = config["weights"]["complaint_rate"]
+            WEIGHT_ATTEMPTED = config["weights"]["attempted"]
+            
+            # Вычисляем взвешенное среднее
+            weighted_sum = 0
+            total_weight = 0
+            if pd.notna(risk_discr): weighted_sum += WEIGHT_DISCRIMINATION * risk_discr; total_weight += WEIGHT_DISCRIMINATION
+            if pd.notna(risk_success): weighted_sum += WEIGHT_SUCCESS_RATE * risk_success; total_weight += WEIGHT_SUCCESS_RATE
+            if pd.notna(risk_trickiness): weighted_sum += WEIGHT_TRICKINESS * risk_trickiness; total_weight += WEIGHT_TRICKINESS
+            if pd.notna(risk_complaints): weighted_sum += WEIGHT_COMPLAINT_RATE * risk_complaints; total_weight += WEIGHT_COMPLAINT_RATE
+            if pd.notna(risk_attempted): weighted_sum += WEIGHT_ATTEMPTED * risk_attempted; total_weight += WEIGHT_ATTEMPTED
+            
+            weighted_avg_risk = (weighted_sum / total_weight) if total_weight > 0 else np.nan
+            
+            # Определяем максимальный риск
+            all_risks_list = [r for r in [risk_discr, risk_success, risk_trickiness, risk_complaints, risk_attempted] if pd.notna(r)]
+            max_risk = np.max(all_risks_list) if all_risks_list else np.nan
+            
+            # Рассчитываем итоговый риск
+            ta_for_confidence = card_row.get("total_attempts")
+            if pd.notna(ta_for_confidence):
+                significance_threshold = config["stats"]["significance_threshold"]
+                if significance_threshold > 0:
+                    confidence_factor_val = min(ta_for_confidence / significance_threshold, 1.0)
+                else:
+                    confidence_factor_val = 1.0
+            
+            final_risk_val = card_row.get('risk', np.nan)
+        
+        # Безопасное получение complaints_total
+        ct_raw = card_row.get('complaints_total')
+        if pd.notna(ct_raw):
+            complaints_total = ct_raw
+        else:
+            cr_for_calc = card_row.get('complaint_rate')
+            ta_for_calc = card_row.get('total_attempts')
+            if pd.notna(cr_for_calc) and pd.notna(ta_for_calc):
+                complaints_total = cr_for_calc * ta_for_calc
+            else:
+                complaints_total = np.nan
+        
+        # Получаем дополнительные данные если нужны
+        screenshot_url = ""
+        embedding_data = None
+        
+        if field_selection.get('screenshot_url', False):
+            card_id_for_screenshot = int(card_row.get("card_id", 0))
+            screenshot_url = get_screenshot_url_gz(card_id_for_screenshot)
+        
+        if field_selection.get('embedding', False):
+            card_id_for_embedding = int(card_row.get("card_id", 0))
+            embedding_data = embedding_data_dict.get(card_id_for_embedding)
+        
+        # Подготавливаем данные для экспорта на основе выбранных полей
+        export_data = {}
+        
+        # Основная информация
+        if field_selection.get('card_id', False):
+            export_data['card_id'] = int(card_row.get("card_id", 0))
+        if field_selection.get('card_type', False):
+            export_data['card_type'] = card_row.get("card_type", "")
+        if field_selection.get('program_name', False):
+            export_data['program_name'] = card_row.get("program_name", "")
+        if field_selection.get('module_name', False):
+            export_data['module_name'] = card_row.get("module_name", "")
+        if field_selection.get('lesson_name', False):
+            export_data['lesson_name'] = card_row.get("lesson_name", "")
+        if field_selection.get('gz_name', False):
+            export_data['gz_name'] = card_row.get("gz_name", "")
+        if field_selection.get('card_order', False):
+            export_data['card_order'] = card_row.get("card_order", "")
+        if field_selection.get('card_url', False):
+            export_data['card_url'] = card_row.get("card_url", "")
+        if field_selection.get('status', False):
+            export_data['status'] = card_row.get("status", "")
+        
+        # Основные метрики
+        if field_selection.get('success_rate', False):
+            export_data['success_rate'] = card_row.get("success_rate")
+        if field_selection.get('first_try_success_rate', False):
+            export_data['first_try_success_rate'] = card_row.get("first_try_success_rate")
+        if field_selection.get('success_diff', False):
+            export_data['success_diff'] = card_row.get("success_diff")
+        if field_selection.get('discrimination_avg', False):
+            export_data['discrimination_avg'] = card_row.get("discrimination_avg")
+        if field_selection.get('complaint_rate', False):
+            export_data['complaint_rate'] = card_row.get("complaint_rate")
+        if field_selection.get('complaints_total', False):
+            export_data['complaints_total'] = complaints_total
+        if field_selection.get('attempted_share', False):
+            export_data['attempted_share'] = card_row.get("attempted_share")
+        if field_selection.get('total_attempts', False):
+            export_data['total_attempts'] = card_row.get("total_attempts")
+        if field_selection.get('time_median', False):
+            export_data['time_median'] = card_row.get("time_median")
+        if field_selection.get('trickiness_level', False):
+            export_data['trickiness_level'] = card_row.get("trickiness_level", 0)
+        
+        # Компоненты риска
+        if field_selection.get('risk_discrimination', False):
+            export_data['risk_discrimination'] = risk_discr
+        if field_selection.get('risk_success_rate', False):
+            export_data['risk_success_rate'] = risk_success
+        if field_selection.get('risk_trickiness', False):
+            export_data['risk_trickiness'] = risk_trickiness
+        if field_selection.get('risk_complaints', False):
+            export_data['risk_complaints'] = risk_complaints
+        if field_selection.get('risk_attempted_share', False):
+            export_data['risk_attempted_share'] = risk_attempted
+        if field_selection.get('weighted_avg_risk', False):
+            export_data['weighted_avg_risk'] = weighted_avg_risk
+        if field_selection.get('max_risk', False):
+            export_data['max_risk'] = max_risk
+        if field_selection.get('confidence_factor', False):
+            export_data['confidence_factor'] = confidence_factor_val
+        if field_selection.get('final_risk', False):
+            export_data['final_risk'] = final_risk_val
+        
+        # Дополнительные данные
+        if field_selection.get('card_public_url', False):
+            export_data['card_public_url'] = card_row.get("card_public_url", "")
+        if field_selection.get('screenshot_url', False):
+            export_data['screenshot_url'] = screenshot_url
+        if field_selection.get('embedding', False):
+            export_data['embedding'] = embedding_data
+        
+        # Временные метки
+        if field_selection.get('updated_at', False):
+            export_data['updated_at'] = card_row.get("updated_at", "")
+        if field_selection.get('updated_by', False):
+            export_data['updated_by'] = card_row.get("updated_by", "")
+        if field_selection.get('export_timestamp', False):
+            export_data['export_timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Тексты жалоб
+        if field_selection.get('complaints_text', False):
+            complaints_text = card_row.get("complaints_text", "")
+            export_data['complaints_text'] = complaints_text.strip() if pd.notna(complaints_text) else ""
+        
+        export_data_list.append(export_data)
+    
+    # Создаем DataFrame
+    df_export = pd.DataFrame(export_data_list)
+    
+    return df_export
+
+def display_csv_download_button_gz(df_cards, engine, field_selection, gz_name):
+    """
+    Отображает кнопку для скачивания данных карточек ГЗ в CSV формате
+    
+    Args:
+        df_cards: DataFrame с данными карточек ГЗ
+        engine: SQLAlchemy engine для подключения к БД
+        field_selection: dict с выбранными индивидуальными полями для экспорта
+        gz_name: Название группы заданий
+    """
+    try:
+        # Подготавливаем данные для экспорта
+        df_export = prepare_gz_data_for_csv(df_cards, engine, field_selection)
+        
+        # Проверяем, есть ли данные для экспорта
+        if df_export.empty or df_export.shape[1] == 0:
+            st.warning("Выберите хотя бы одно поле для экспорта")
+            return
+        
+        # Конвертируем в CSV
+        csv_buffer = io.StringIO()
+        df_export.to_csv(csv_buffer, index=False, encoding='utf-8-sig')
+        csv_data = csv_buffer.getvalue()
+        
+        # Формируем имя файла
+        selected_fields = [k for k, v in field_selection.items() if v]
+        field_count = len(selected_fields)
+        cards_count = len(df_cards)
+        
+        # Сокращаем имя файла, чтобы оно не было слишком длинным
+        safe_gz_name = "".join(c for c in gz_name if c.isalnum() or c in (' ', '-', '_')).rstrip()[:20]
+        if field_count <= 5:
+            fields_suffix = "_".join(selected_fields[:5])
+        else:
+            fields_suffix = f"{field_count}_fields"
+        
+        filename = f"gz_{safe_gz_name}_{cards_count}_cards_{fields_suffix}.csv"
+        
+        # Отображаем кнопку скачивания
+        st.download_button(
+            label=f"📥 Скачать данные ГЗ ({cards_count} карточек, {field_count} полей)",
+            data=csv_data,
+            file_name=filename,
+            mime="text/csv",
+            help=f"Экспортировать {field_count} выбранных полей для {cards_count} карточек"
+        )
+        
+    except Exception as e:
+        st.error(f"Ошибка при подготовке данных для экспорта: {str(e)}")
