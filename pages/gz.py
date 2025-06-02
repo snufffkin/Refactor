@@ -1381,10 +1381,10 @@ def create_screenshot_matrix(screenshots_data, gz_name):
         return None
     
     # Параметры матрицы
-    THUMBNAIL_WIDTH = 300
-    THUMBNAIL_HEIGHT = 200
+    THUMBNAIL_WIDTH = 600
+    THUMBNAIL_HEIGHT = 500
     LABEL_HEIGHT = 30
-    PADDING = 10
+    PADDING = 5
     BACKGROUND_COLOR = (255, 255, 255)  # Белый
     TEXT_COLOR = (0, 0, 0)  # Черный
     
