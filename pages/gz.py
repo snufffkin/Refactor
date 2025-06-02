@@ -14,6 +14,8 @@ import io
 import zipfile
 import requests
 from datetime import datetime
+from PIL import Image, ImageDraw, ImageFont
+import math
 
 import core
 from components.utils import create_hierarchical_header, display_clickable_items, add_gz_links
@@ -1364,6 +1366,157 @@ def download_image_from_url(url, timeout=10):
         print(f"Ошибка при скачивании изображения {url}: {str(e)}")
         return None
 
+def create_screenshot_matrix(screenshots_data, gz_name):
+    """
+    Создает матрицу скриншотов - одно большое изображение со всеми скриншотами карточек
+    
+    Args:
+        screenshots_data: список кортежей (card_id, image_data) с данными изображений
+        gz_name: название группы заданий
+        
+    Returns:
+        bytes: содержимое PNG изображения матрицы
+    """
+    if not screenshots_data:
+        return None
+    
+    # Параметры матрицы
+    THUMBNAIL_WIDTH = 300
+    THUMBNAIL_HEIGHT = 200
+    LABEL_HEIGHT = 30
+    PADDING = 10
+    BACKGROUND_COLOR = (255, 255, 255)  # Белый
+    TEXT_COLOR = (0, 0, 0)  # Черный
+    
+    # Вычисляем количество колонок и строк (примерно квадратная сетка)
+    total_images = len(screenshots_data)
+    cols = math.ceil(math.sqrt(total_images))
+    rows = math.ceil(total_images / cols)
+    
+    # Размеры итогового изображения
+    cell_width = THUMBNAIL_WIDTH + PADDING
+    cell_height = THUMBNAIL_HEIGHT + LABEL_HEIGHT + PADDING
+    
+    matrix_width = cols * cell_width + PADDING
+    matrix_height = rows * cell_height + PADDING + 50  # +50 для заголовка
+    
+    # Создаем основное изображение
+    matrix_image = Image.new('RGB', (matrix_width, matrix_height), BACKGROUND_COLOR)
+    draw = ImageDraw.Draw(matrix_image)
+    
+    # Пытаемся загрузить шрифт
+    try:
+        # Попробуем несколько вариантов шрифтов
+        font_paths = [
+            "arial.ttf", "Arial.ttf", "calibri.ttf", "Calibri.ttf",
+            "/System/Library/Fonts/Arial.ttf",  # macOS
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"  # Linux
+        ]
+        font = None
+        for font_path in font_paths:
+            try:
+                font = ImageFont.truetype(font_path, 16)
+                break
+            except:
+                continue
+        
+        title_font = ImageFont.truetype(font_path, 20) if font else None
+    except:
+        font = ImageFont.load_default()
+        title_font = ImageFont.load_default()
+    
+    # Добавляем заголовок
+    title_text = f"Матрица скриншотов: {gz_name} ({total_images} карточек)"
+    title_bbox = draw.textbbox((0, 0), title_text, font=title_font)
+    title_width = title_bbox[2] - title_bbox[0]
+    title_x = (matrix_width - title_width) // 2
+    draw.text((title_x, 15), title_text, fill=TEXT_COLOR, font=title_font)
+    
+    # Размещаем скриншоты
+    for idx, (card_id, image_data) in enumerate(screenshots_data):
+        row = idx // cols
+        col = idx % cols
+        
+        # Вычисляем позицию
+        x = col * cell_width + PADDING
+        y = row * cell_height + PADDING + 50  # +50 для заголовка
+        
+        try:
+            if image_data:
+                # Загружаем и обрабатываем изображение
+                screenshot = Image.open(io.BytesIO(image_data))
+                
+                # Изменяем размер с сохранением пропорций
+                screenshot.thumbnail((THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT), Image.Resampling.LANCZOS)
+                
+                # Создаем изображение с белым фоном для центрирования
+                thumbnail = Image.new('RGB', (THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT), BACKGROUND_COLOR)
+                
+                # Центрируем скриншот
+                paste_x = (THUMBNAIL_WIDTH - screenshot.width) // 2
+                paste_y = (THUMBNAIL_HEIGHT - screenshot.height) // 2
+                thumbnail.paste(screenshot, (paste_x, paste_y))
+                
+                # Вставляем в матрицу
+                matrix_image.paste(thumbnail, (x, y))
+            else:
+                # Создаем заглушку для отсутствующего изображения
+                placeholder = Image.new('RGB', (THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT), (240, 240, 240))
+                placeholder_draw = ImageDraw.Draw(placeholder)
+                
+                # Добавляем текст "Нет изображения"
+                placeholder_text = "Нет\nизображения"
+                text_bbox = placeholder_draw.textbbox((0, 0), placeholder_text, font=font)
+                text_width = text_bbox[2] - text_bbox[0]
+                text_height = text_bbox[3] - text_bbox[1]
+                text_x = (THUMBNAIL_WIDTH - text_width) // 2
+                text_y = (THUMBNAIL_HEIGHT - text_height) // 2
+                placeholder_draw.text((text_x, text_y), placeholder_text, fill=(128, 128, 128), font=font, align='center')
+                
+                matrix_image.paste(placeholder, (x, y))
+            
+        except Exception as e:
+            print(f"Ошибка при обработке изображения для карточки {card_id}: {str(e)}")
+            # Создаем заглушку с ошибкой
+            error_placeholder = Image.new('RGB', (THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT), (255, 200, 200))
+            error_draw = ImageDraw.Draw(error_placeholder)
+            error_text = "Ошибка\nзагрузки"
+            text_bbox = error_draw.textbbox((0, 0), error_text, font=font)
+            text_width = text_bbox[2] - text_bbox[0]
+            text_height = text_bbox[3] - text_bbox[1]
+            text_x = (THUMBNAIL_WIDTH - text_width) // 2
+            text_y = (THUMBNAIL_HEIGHT - text_height) // 2
+            error_draw.text((text_x, text_y), error_text, fill=(128, 0, 0), font=font, align='center')
+            matrix_image.paste(error_placeholder, (x, y))
+        
+        # Добавляем подпись с ID карточки
+        label_text = f"ID: {card_id}"
+        label_y = y + THUMBNAIL_HEIGHT + 5
+        
+        # Центрируем текст подписи
+        text_bbox = draw.textbbox((0, 0), label_text, font=font)
+        text_width = text_bbox[2] - text_bbox[0]
+        label_x = x + (THUMBNAIL_WIDTH - text_width) // 2
+        
+        # Рисуем фон для текста (белый прямоугольник)
+        bg_padding = 2
+        draw.rectangle([
+            label_x - bg_padding, 
+            label_y - bg_padding,
+            label_x + text_width + bg_padding,
+            label_y + text_bbox[3] - text_bbox[1] + bg_padding
+        ], fill=BACKGROUND_COLOR, outline=(200, 200, 200))
+        
+        # Рисуем текст
+        draw.text((label_x, label_y), label_text, fill=TEXT_COLOR, font=font)
+    
+    # Сохраняем в буфер
+    output_buffer = io.BytesIO()
+    matrix_image.save(output_buffer, format='PNG', quality=95)
+    output_buffer.seek(0)
+    
+    return output_buffer.getvalue()
+
 def create_zip_archive_with_screenshots(df_export, df_cards, gz_name):
     """
     Создает ZIP архив с CSV файлом и скриншотами карточек
@@ -1395,6 +1548,7 @@ def create_zip_archive_with_screenshots(df_export, df_cards, gz_name):
         # Скачиваем и добавляем скриншоты
         success_count = 0
         error_count = 0
+        screenshots_data = []  # Для создания матрицы
         
         for _, card_row in df_cards.iterrows():
             card_id = int(card_row.get("card_id", 0))
@@ -1410,16 +1564,46 @@ def create_zip_archive_with_screenshots(df_export, df_cards, gz_name):
                 image_filename = f"{screenshots_folder}{card_id}.png"
                 zip_file.writestr(image_filename, image_data)
                 success_count += 1
+                
+                # Сохраняем для матрицы
+                screenshots_data.append((card_id, image_data))
             else:
                 error_count += 1
+                # Добавляем в матрицу даже если изображение не загрузилось
+                screenshots_data.append((card_id, None))
+        
+        # Создаем и добавляем матрицу скриншотов
+        if screenshots_data:
+            try:
+                matrix_data = create_screenshot_matrix(screenshots_data, gz_name)
+                if matrix_data:
+                    matrix_filename = f"screenshot_matrix_{safe_gz_name}.png"
+                    zip_file.writestr(matrix_filename, matrix_data)
+                    print(f"Матрица скриншотов создана: {matrix_filename}")
+            except Exception as e:
+                print(f"Ошибка при создании матрицы скриншотов: {str(e)}")
         
         # Добавляем информационный файл о результатах скачивания
+        matrix_info = "Да" if screenshots_data else "Нет"
         info_content = f"""Информация о скачивании скриншотов
 Группа заданий: {gz_name}
 Всего карточек: {len(df_cards)}
 Скриншотов успешно скачано: {success_count}
 Ошибок при скачивании: {error_count}
+Матрица скриншотов создана: {matrix_info}
 Дата создания архива: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+Содержимое архива:
+- {csv_filename} - CSV файл с данными карточек
+- screenshots/ - папка с индивидуальными скриншотами карточек
+- screenshot_matrix_{safe_gz_name}.png - матрица всех скриншотов с подписями ID
+- download_info.txt - этот информационный файл
+
+Как использовать матрицу скриншотов:
+Матрица содержит все скриншоты карточек в виде сетки с подписями ID.
+Каждый скриншот масштабирован до размера 300x200 пикселей с сохранением пропорций.
+Под каждым изображением указан ID соответствующей карточки.
+Это удобно для быстрого визуального анализа всех карточек группы заданий.
 """
         zip_file.writestr("download_info.txt", info_content.encode('utf-8'))
     
