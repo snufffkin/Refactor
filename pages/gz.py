@@ -855,7 +855,7 @@ def page_gz(df_cards_input: pd.DataFrame, eng, create_link_fn=None):
                 'basic': ['card_id', 'card_type', 'program_name', 'module_name', 'lesson_name', 'gz_name', 'card_order', 'card_url', 'status'],
                 'metrics': ['success_rate', 'first_try_success_rate', 'success_diff', 'discrimination_avg', 'complaint_rate', 'complaints_total', 'attempted_share', 'total_attempts', 'time_median', 'trickiness_level'],
                 'risk': ['risk_discrimination', 'risk_success_rate', 'risk_trickiness', 'risk_complaints', 'risk_attempted_share', 'weighted_avg_risk', 'max_risk', 'confidence_factor', 'final_risk'],
-                'additional': ['card_public_url', 'screenshot_url', 'embedding'],
+                'additional': ['card_public_url', 'screenshot_url', 'embedding', 'text_blocks', 'media', 'interactives'],
                 'timestamps': ['updated_at', 'updated_by', 'export_timestamp'],
                 'complaints_text': ['complaints_text']
             }
@@ -944,7 +944,10 @@ def display_export_field_selector_gz():
             'fields': {
                 'card_public_url': 'Публичная ссылка на карточку',
                 'screenshot_url': 'Ссылка на скриншот',
-                'embedding': 'Векторное представление (embedding)'
+                'embedding': 'Векторное представление (embedding)',
+                'text_blocks': 'Текстовые блоки карточки',
+                'media': 'Медиа-контент карточки',
+                'interactives': 'Интерактивные элементы карточки'
             }
         },
         'timestamps': {
@@ -1084,8 +1087,9 @@ def prepare_gz_data_for_csv(df_cards, engine, field_selection=None):
             'risk_success_rate': True, 'risk_trickiness': True, 'risk_complaints': True,
             'risk_attempted_share': True, 'weighted_avg_risk': True, 'max_risk': True,
             'confidence_factor': True, 'final_risk': True, 'card_public_url': True,
-            'screenshot_url': True, 'embedding': True, 'updated_at': True,
-            'updated_by': True, 'export_timestamp': True, 'complaints_text': True
+            'screenshot_url': True, 'embedding': True, 'text_blocks': True, 'media': True,
+            'interactives': True, 'updated_at': True, 'updated_by': True, 
+            'export_timestamp': True, 'complaints_text': True
         }
     
     if df_cards.empty:
@@ -1097,31 +1101,57 @@ def prepare_gz_data_for_csv(df_cards, engine, field_selection=None):
     # Список для хранения данных экспорта
     export_data_list = []
     
-    # Получаем embedding и другие дополнительные данные только если нужны
-    embedding_data_dict = {}
-    if field_selection.get('embedding', False):
+    # Получаем данные из cards_content только если нужны
+    content_data_dict = {}
+    content_fields_needed = any(field_selection.get(field, False) for field in ['embedding', 'text_blocks', 'media', 'interactives'])
+    
+    if content_fields_needed:
         try:
-            card_ids_for_embedding = df_cards['card_id'].dropna().unique().tolist()
-            if card_ids_for_embedding:
+            card_ids_for_content = df_cards['card_id'].dropna().unique().tolist()
+            if card_ids_for_content:
                 with engine.connect() as conn:
                     from sqlalchemy import text
-                    embedding_query = text("""
-                        SELECT card_id, embedding 
+                    
+                    # Формируем список полей для запроса
+                    fields_to_select = ['card_id']
+                    if field_selection.get('embedding', False):
+                        fields_to_select.append('embedding')
+                    if field_selection.get('text_blocks', False):
+                        fields_to_select.append('text_blocks')
+                    if field_selection.get('media', False):
+                        fields_to_select.append('media')
+                    if field_selection.get('interactives', False):
+                        fields_to_select.append('interactives')
+                    
+                    content_query = text(f"""
+                        SELECT {', '.join(fields_to_select)}
                         FROM cards_content 
                         WHERE card_id = ANY(:card_ids)
                     """)
-                    result = conn.execute(embedding_query, {"card_ids": card_ids_for_embedding})
+                    result = conn.execute(content_query, {"card_ids": card_ids_for_content})
+                    
                     for row in result:
-                        try:
-                            vector_str = str(row[1])
-                            if vector_str.startswith('[') and vector_str.endswith(']'):
-                                embedding_data_dict[row[0]] = vector_str[1:-1]  # Убираем [ и ]
-                            else:
-                                embedding_data_dict[row[0]] = vector_str
-                        except Exception:
-                            embedding_data_dict[row[0]] = str(row[1])
+                        card_id = row[0]
+                        content_data_dict[card_id] = {}
+                        
+                        for i, field_name in enumerate(fields_to_select[1:], 1):  # Пропускаем card_id
+                            try:
+                                field_value = row[i]
+                                if field_name == 'embedding' and field_value:
+                                    # Специальная обработка для embedding
+                                    vector_str = str(field_value)
+                                    if vector_str.startswith('[') and vector_str.endswith(']'):
+                                        content_data_dict[card_id][field_name] = vector_str[1:-1]  # Убираем [ и ]
+                                    else:
+                                        content_data_dict[card_id][field_name] = vector_str
+                                else:
+                                    # Для остальных полей просто конвертируем в строку
+                                    content_data_dict[card_id][field_name] = str(field_value) if field_value is not None else ""
+                            except Exception as field_e:
+                                print(f"Ошибка при обработке поля {field_name} для карточки {card_id}: {str(field_e)}")
+                                content_data_dict[card_id][field_name] = ""
         except Exception as e:
-            print(f"Ошибка при получении embedding для ГЗ: {str(e)}")
+            print(f"Ошибка при получении данных из cards_content для ГЗ: {str(e)}")
     
     # Обрабатываем каждую карточку
     for _, card_row in df_cards.iterrows():
@@ -1191,15 +1221,11 @@ def prepare_gz_data_for_csv(df_cards, engine, field_selection=None):
         
         # Получаем дополнительные данные если нужны
         screenshot_url = ""
-        embedding_data = None
+        card_id_int = int(card_row.get("card_id", 0))
+        card_content_data = content_data_dict.get(card_id_int, {})
         
         if field_selection.get('screenshot_url', False):
-            card_id_for_screenshot = int(card_row.get("card_id", 0))
-            screenshot_url = get_screenshot_url_gz(card_id_for_screenshot)
-        
-        if field_selection.get('embedding', False):
-            card_id_for_embedding = int(card_row.get("card_id", 0))
-            embedding_data = embedding_data_dict.get(card_id_for_embedding)
+            screenshot_url = get_screenshot_url_gz(card_id_int)
         
         # Подготавливаем данные для экспорта на основе выбранных полей
         export_data = {}
@@ -1272,7 +1298,13 @@ def prepare_gz_data_for_csv(df_cards, engine, field_selection=None):
         if field_selection.get('screenshot_url', False):
             export_data['screenshot_url'] = screenshot_url
         if field_selection.get('embedding', False):
-            export_data['embedding'] = embedding_data
+            export_data['embedding'] = card_content_data.get('embedding', "")
+        if field_selection.get('text_blocks', False):
+            export_data['text_blocks'] = card_content_data.get('text_blocks', "")
+        if field_selection.get('media', False):
+            export_data['media'] = card_content_data.get('media', "")
+        if field_selection.get('interactives', False):
+            export_data['interactives'] = card_content_data.get('interactives', "")
         
         # Временные метки
         if field_selection.get('updated_at', False):
