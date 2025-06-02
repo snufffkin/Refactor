@@ -541,51 +541,136 @@ def page_lessons(df: pd.DataFrame):
 
         # AI-суммаризация отзывов
         with tabs[5]:
-            if "ai_summarization" in row and pd.notna(row["ai_summarization"]):
+            if "ai_summarization_v2" in row and pd.notna(row["ai_summarization_v2"]):
                 try:
-                    ai_data = row["ai_summarization"]
+                    ai_data = row["ai_summarization_v2"]
                     if isinstance(ai_data, str):
                         import json
                         ai_data = json.loads(ai_data)
                     
-                    # Функция для отображения элементов с приоритетом
-                    def display_priority_items(items, title):
-                        """Отображает список элементов с цветовой кодировкой приоритета"""
+                    # Функция для отображения цитат учителей
+                    def display_quotes(quotes):
+                        """Отображает цитаты учителей серым маленьким шрифтом"""
+                        if not quotes:
+                            return
+                        
+                        for quote in quotes:
+                            if quote and quote.strip():
+                                st.markdown(f"""
+                                <div style="
+                                    color: #666666;
+                                    font-size: 0.75em;
+                                    font-style: italic;
+                                    margin: 2px 0;
+                                    padding-left: 10px;
+                                    border-left: 2px solid #e0e0e0;
+                                ">
+                                    "{quote}"
+                                </div>
+                                """, unsafe_allow_html=True)
+                    
+                    # Функция для отображения элемента анализа с summary + quotes
+                    def display_analysis_item(item):
+                        """Отображает элемент анализа с цветовой кодировкой и цитатами"""
+                        if isinstance(item, dict) and "summary" in item:
+                            summary = item["summary"]
+                            quotes = item.get("quotes", [])
+                            
+                            # Определяем цвет фона по эмодзи приоритета
+                            if summary.startswith("🔴"):
+                                bg_color = "rgba(255, 82, 82, 0.1)"
+                                border_color = "rgba(255, 82, 82, 0.3)"
+                            elif summary.startswith("🟠"):
+                                bg_color = "rgba(255, 159, 64, 0.1)"
+                                border_color = "rgba(255, 159, 64, 0.3)"
+                            elif summary.startswith("🟡"):
+                                bg_color = "rgba(255, 205, 86, 0.1)"
+                                border_color = "rgba(255, 205, 86, 0.3)"
+                            elif summary.startswith("🟢"):
+                                bg_color = "rgba(75, 192, 192, 0.1)"
+                                border_color = "rgba(75, 192, 192, 0.3)"
+                            else:
+                                bg_color = "rgba(200, 200, 200, 0.1)"
+                                border_color = "rgba(200, 200, 200, 0.3)"
+                            
+                            st.markdown(f"""
+                            <div style="
+                                background-color: {bg_color};
+                                border: 1px solid {border_color};
+                                border-radius: 4px;
+                                padding: 8px;
+                                margin-bottom: 8px;
+                                font-size: 0.9em;
+                            ">
+                                {summary}
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            # Отображаем цитаты под элементом
+                            if quotes:
+                                display_quotes(quotes)
+                    
+                    # Функция для отображения секции анализа
+                    def display_analysis_section(items, title):
+                        """Отображает секцию анализа с заголовком"""
                         if not items:
                             return
                         
                         st.markdown(f"**{title}**")
                         for item in items:
-                            if isinstance(item, str):
-                                # Определяем цвет фона по эмодзи приоритета
-                                if item.startswith("🔴"):
-                                    bg_color = "rgba(255, 82, 82, 0.1)"
-                                    border_color = "rgba(255, 82, 82, 0.3)"
-                                elif item.startswith("🟠"):
-                                    bg_color = "rgba(255, 159, 64, 0.1)"
-                                    border_color = "rgba(255, 159, 64, 0.3)"
-                                elif item.startswith("🟡"):
-                                    bg_color = "rgba(255, 205, 86, 0.1)"
-                                    border_color = "rgba(255, 205, 86, 0.3)"
-                                elif item.startswith("🟢"):
-                                    bg_color = "rgba(75, 192, 192, 0.1)"
-                                    border_color = "rgba(75, 192, 192, 0.3)"
-                                else:
-                                    bg_color = "rgba(200, 200, 200, 0.1)"
-                                    border_color = "rgba(200, 200, 200, 0.3)"
-                                
-                                st.markdown(f"""
-                                <div style="
-                                    background-color: {bg_color};
-                                    border: 1px solid {border_color};
-                                    border-radius: 4px;
-                                    padding: 8px;
-                                    margin-bottom: 4px;
-                                    font-size: 0.9em;
-                                ">
-                                    {item}
-                                </div>
-                                """, unsafe_allow_html=True)
+                            display_analysis_item(item)
+                    
+                    # Функция для отображения элемента паттерна
+                    def display_pattern_item(item):
+                        """Отображает элемент паттерна с названием, описанием и цитатами"""
+                        if not isinstance(item, dict):
+                            return
+                        
+                        # Получаем название (может быть aspect, issue, topic)
+                        title = item.get("aspect") or item.get("issue") or item.get("topic", "")
+                        description = item.get("description", "")
+                        quotes = item.get("quotes", [])
+                        opposing_quotes = item.get("opposing_quotes", [])  # Для controversial_points
+                        
+                        if title:
+                            st.markdown(f"""
+                            <div style="
+                                background-color: rgba(100, 150, 200, 0.1);
+                                border: 1px solid rgba(100, 150, 200, 0.3);
+                                border-radius: 4px;
+                                padding: 8px;
+                                margin-bottom: 8px;
+                                font-size: 0.9em;
+                            ">
+                                <strong>{title}</strong><br/>
+                                {description}
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            # Отображаем цитаты
+                            if quotes:
+                                display_quotes(quotes)
+                            
+                            # Для спорных моментов отображаем opposing_quotes
+                            if opposing_quotes:
+                                st.markdown("<small><em>Противоположные мнения:</em></small>", unsafe_allow_html=True)
+                                display_quotes(opposing_quotes)
+                    
+                    # Функция для отображения секции паттернов
+                    def display_pattern_section(items, title):
+                        """Отображает секцию паттернов с заголовком"""
+                        if not items:
+                            return
+                        
+                        st.markdown(f"**{title}**")
+                        for item in items:
+                            display_pattern_item(item)
+                    
+                    # Основная информация об уроке
+                    if "lesson_info" in ai_data:
+                        lesson_info = ai_data["lesson_info"]
+                        if "teachers_count" in lesson_info:
+                            st.metric("Количество отзывов учителей", lesson_info["teachers_count"])
                     
                     # Общая сводка
                     if "summary" in ai_data:
@@ -596,124 +681,73 @@ def page_lessons(df: pd.DataFrame):
                         if "main_conclusion" in summary:
                             st.info(summary["main_conclusion"])
                         
-                        # Создаем вкладки для приоритетных улучшений и рекомендаций
-                        summary_tabs = st.tabs(["Приоритетные улучшения", "Рекомендации"])
+                    # Детальный анализ по категориям
+                    if "text_analysis" in ai_data:
+                        text_analysis = ai_data["text_analysis"]
+                        st.markdown("### 📝 Детальный анализ по категориям")
                         
-                        with summary_tabs[0]:
-                            # Приоритетные улучшения
-                            if "priority_improvements" in summary:
-                                display_priority_items(summary["priority_improvements"], "Приоритетные улучшения:")
+                        # Создаем вкладки для каждой категории
+                        analysis_tabs = st.tabs(["Презентация", "Рабочая тетрадь", "Доп. материалы", "Интересность", "Сложность"])
                         
-                        with summary_tabs[1]:
-                            # Объединенные рекомендации
-                            st.markdown("#### Рекомендации по улучшению урока")
-                            
-                            # Собираем все рекомендации в один список с категориями
-                            if "methodist_action_items" in ai_data:
-                                actions = ai_data["methodist_action_items"]
-                                
-                                if "immediate_fixes" in actions and actions["immediate_fixes"]:
-                                    display_priority_items(actions["immediate_fixes"], "Срочные исправления:")
-                                
-                                if "content_additions" in actions and actions["content_additions"]:
-                                    display_priority_items(actions["content_additions"], "Добавить контент:")
-                                
-                                if "structural_changes" in actions and actions["structural_changes"]:
-                                    display_priority_items(actions["structural_changes"], "Структурные изменения:")
-                                
-                                if "content_removals" in actions and actions["content_removals"]:
-                                    display_priority_items(actions["content_removals"], "Удалить контент:")
-                                
-                                if "assessment_recommendations" in actions and actions["assessment_recommendations"]:
-                                    display_priority_items(actions["assessment_recommendations"], "Рекомендации по оценке:")
-                            
-                            if "teacher_recommendations" in ai_data:
-                                teacher_recs = ai_data["teacher_recommendations"]
-                                
-                                if "engagement_ideas" in teacher_recs and teacher_recs["engagement_ideas"]:
-                                    display_priority_items(teacher_recs["engagement_ideas"], "Идеи для вовлечения:")
-                                
-                                if "content_improvements" in teacher_recs and teacher_recs["content_improvements"]:
-                                    display_priority_items(teacher_recs["content_improvements"], "Улучшение контента:")
-                                
-                                if "complexity_adjustments" in teacher_recs and teacher_recs["complexity_adjustments"]:
-                                    display_priority_items(teacher_recs["complexity_adjustments"], "Корректировка сложности:")
-                                
-                                if "methodology_suggestions" in teacher_recs and teacher_recs["methodology_suggestions"]:
-                                    display_priority_items(teacher_recs["methodology_suggestions"], "Методические предложения:")
+                        with analysis_tabs[0]:
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                display_analysis_section(text_analysis.get("presentation_positives", []), "Что понравилось:")
+                            with col2:
+                                display_analysis_section(text_analysis.get("presentation_negatives", []), "Что не понравилось:")
+                        
+                        with analysis_tabs[1]:
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                display_analysis_section(text_analysis.get("workbook_positives", []), "Что понравилось:")
+                            with col2:
+                                display_analysis_section(text_analysis.get("workbook_negatives", []), "Что не понравилось:")
+                        
+                        with analysis_tabs[2]:
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                display_analysis_section(text_analysis.get("materials_positives", []), "Что понравилось:")
+                            with col2:
+                                display_analysis_section(text_analysis.get("materials_negatives", []), "Что не понравилось:")
+                        
+                        with analysis_tabs[3]:
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                display_analysis_section(text_analysis.get("interest_positives", []), "Что вызывает интерес:")
+                            with col2:
+                                display_analysis_section(text_analysis.get("interest_negatives", []), "Что снижает интерес:")
+                        
+                        with analysis_tabs[4]:
+                            display_analysis_section(text_analysis.get("complexity_feedback", []), "Отзывы о сложности:")
                     
-                    # Сильные стороны и проблемы
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.markdown("### 💪 Сильные стороны")
-                        if "key_strengths" in ai_data:
-                            strengths = ai_data["key_strengths"]
-                            
-                            # Презентация
-                            if "presentation" in strengths and strengths["presentation"]:
-                                display_priority_items(strengths["presentation"], "Презентация:")
-                            
-                            # Рабочая тетрадь
-                            if "workbook" in strengths and strengths["workbook"]:
-                                display_priority_items(strengths["workbook"], "Рабочая тетрадь:")
-                            
-                            # Педагогическая ценность
-                            if "pedagogical_value" in strengths and strengths["pedagogical_value"]:
-                                display_priority_items(strengths["pedagogical_value"], "Педагогическая ценность:")
-                            
-                            # Дополнительные материалы
-                            if "additional_materials" in strengths and strengths["additional_materials"]:
-                                display_priority_items(strengths["additional_materials"], "Дополнительные материалы:")
-                    
-                    with col2:
-                        st.markdown("### ⚠️ Выявленные проблемы")
-                        if "identified_issues" in ai_data:
-                            issues = ai_data["identified_issues"]
-                            
-                            # Презентация
-                            if "presentation" in issues and issues["presentation"]:
-                                display_priority_items(issues["presentation"], "Презентация:")
-                            
-                            # Рабочая тетрадь
-                            if "workbook" in issues and issues["workbook"]:
-                                display_priority_items(issues["workbook"], "Рабочая тетрадь:")
-                            
-                            # Баланс сложности
-                            if "complexity_balance" in issues and issues["complexity_balance"]:
-                                display_priority_items(issues["complexity_balance"], "Баланс сложности:")
-                            
-                            # Дополнительные материалы
-                            if "additional_materials" in issues and issues["additional_materials"]:
-                                display_priority_items(issues["additional_materials"], "Дополнительные материалы:")
-                    
-                    # Паттерны и инсайты
-                    if "patterns_and_insights" in ai_data:
-                        st.markdown("### 🔍 Паттерны и инсайты")
-                        patterns = ai_data["patterns_and_insights"]
+                    # Паттерны и обобщения
+                    if "patterns_summary" in ai_data:
+                        patterns = ai_data["patterns_summary"]
+                        st.markdown("### 🔍 Паттерны и обобщения")
                         
                         col1, col2 = st.columns(2)
                         
                         with col1:
-                            if "teacher_consensus" in patterns:
-                                display_priority_items(patterns["teacher_consensus"], "Консенсус учителей:")
-                            
-                            if "successful_elements" in patterns:
-                                display_priority_items(patterns["successful_elements"], "Успешные элементы:")
+                            st.markdown("#### 💪 Сильные стороны")
+                            display_pattern_section(patterns.get("most_praised_aspects", []), "Самые хвалимые аспекты:")
+                            display_pattern_section(patterns.get("teacher_consensus", []), "Консенсус учителей:")
                         
                         with col2:
-                            if "common_difficulties" in patterns:
-                                display_priority_items(patterns["common_difficulties"], "Общие сложности:")
-                            
-                            if "controversial_points" in patterns:
-                                display_priority_items(patterns["controversial_points"], "Спорные моменты:")
+                            st.markdown("#### ⚠️ Проблемные области")
+                            display_pattern_section(patterns.get("most_criticized_issues", []), "Самые критикуемые проблемы:")
+                            display_pattern_section(patterns.get("controversial_points", []), "Спорные моменты:")
                     
                 except Exception as e:
                     st.error(f"Ошибка при обработке AI-суммаризации: {e}")
                     st.text("Данные AI-суммаризации:")
-                    st.json(row["ai_summarization"])
+                    st.json(row["ai_summarization_v2"])
             else:
-                st.info("AI-суммаризация для этого урока пока недоступна")
+                # Проверяем старый формат для обратной совместимости
+                if "ai_summarization" in row and pd.notna(row["ai_summarization"]):
+                    st.warning("Обнаружен старый формат AI-суммаризации. Пожалуйста, обновите анализ для получения новой детальной суммаризации с цитатами.")
+                    st.json(row["ai_summarization"])
+                else:
+                    st.info("AI-суммаризация для этого урока пока недоступна")
 
     st.subheader("🛠️ Управление статусами карточек урока")
 
