@@ -11,6 +11,8 @@ import plotly.graph_objects as go
 import numpy as np
 import urllib.parse as ul
 import io
+import zipfile
+import requests
 from datetime import datetime
 
 import core
@@ -845,8 +847,9 @@ def page_gz(df_cards_input: pd.DataFrame, eng, create_link_fn=None):
         display_csv_download_button_gz(df_cards, eng, field_selection_gz, gz_name)
     with col2:
         # Показываем информацию о выбранных полях
-        selected_fields = [k for k, v in field_selection_gz.items() if v]
-        if selected_fields:
+        selected_fields = [k for k, v in field_selection_gz.items() if v and k != 'download_screenshots']
+        download_screenshots = field_selection_gz.get('download_screenshots', False)
+        if selected_fields or download_screenshots:
             field_count = len(selected_fields)
             cards_count = len(df_cards)
             
@@ -857,7 +860,8 @@ def page_gz(df_cards_input: pd.DataFrame, eng, create_link_fn=None):
                 'risk': ['risk_discrimination', 'risk_success_rate', 'risk_trickiness', 'risk_complaints', 'risk_attempted_share', 'weighted_avg_risk', 'max_risk', 'confidence_factor', 'final_risk'],
                 'additional': ['card_public_url', 'screenshot_url', 'embedding', 'text_blocks', 'media', 'interactives'],
                 'timestamps': ['updated_at', 'updated_by', 'export_timestamp'],
-                'complaints_text': ['complaints_text']
+                'complaints_text': ['complaints_text'],
+                'screenshots': ['download_screenshots']
             }
             
             group_names_display = {
@@ -866,7 +870,8 @@ def page_gz(df_cards_input: pd.DataFrame, eng, create_link_fn=None):
                 'risk': '⚠️ Компоненты риска',
                 'additional': '🔗 Дополнительные данные',
                 'timestamps': '🕒 Временные метки',
-                'complaints_text': '💬 Тексты жалоб'
+                'complaints_text': '💬 Тексты жалоб',
+                'screenshots': '📸 Файлы скриншотов'
             }
             
             selected_by_group = {}
@@ -881,9 +886,17 @@ def page_gz(df_cards_input: pd.DataFrame, eng, create_link_fn=None):
                     info_text += f"**{group_names_display[group]}:** {len(fields)} полей\n"
                     info_text += "• " + ", ".join(fields) + "\n\n"
                 
+                # Добавляем информацию о скриншотах
+                if download_screenshots:
+                    info_text += "**📸 Файлы скриншотов:** Включены в архив\n"
+                    info_text += "• Будет создан ZIP архив с CSV файлом и изображениями скриншотов\n\n"
+                
                 st.info(info_text, icon="ℹ️")
             else:
-                st.info(f"**Выбрано {field_count} кастомных полей для экспорта {cards_count} карточек**", icon="ℹ️")
+                base_text = f"**Выбрано {field_count} кастомных полей для экспорта {cards_count} карточек**"
+                if download_screenshots:
+                    base_text += "\n\n**📸 Файлы скриншотов:** Включены в архив"
+                st.info(base_text, icon="ℹ️")
         else:
             st.warning("Не выбрано ни одного поля для экспорта", icon="⚠️")
 
@@ -962,6 +975,12 @@ def display_export_field_selector_gz():
             'title': '💬 Тексты жалоб',
             'fields': {
                 'complaints_text': 'Полные тексты жалоб'
+            }
+        },
+        'screenshots': {
+            'title': '📸 Файлы скриншотов',
+            'fields': {
+                'download_screenshots': 'Скачать файлы скриншотов карточек'
             }
         }
     }
@@ -1089,7 +1108,7 @@ def prepare_gz_data_for_csv(df_cards, engine, field_selection=None):
             'confidence_factor': True, 'final_risk': True, 'card_public_url': True,
             'screenshot_url': True, 'embedding': True, 'text_blocks': True, 'media': True,
             'interactives': True, 'updated_at': True, 'updated_by': True, 
-            'export_timestamp': True, 'complaints_text': True
+            'export_timestamp': True, 'complaints_text': True, 'download_screenshots': False
         }
     
     if df_cards.empty:
@@ -1326,9 +1345,90 @@ def prepare_gz_data_for_csv(df_cards, engine, field_selection=None):
     
     return df_export
 
+def download_image_from_url(url, timeout=10):
+    """
+    Скачивает изображение по URL
+    
+    Args:
+        url: URL изображения для скачивания
+        timeout: Таймаут запроса в секундах
+        
+    Returns:
+        bytes: Содержимое изображения или None при ошибке
+    """
+    try:
+        response = requests.get(url, timeout=timeout)
+        response.raise_for_status()
+        return response.content
+    except Exception as e:
+        print(f"Ошибка при скачивании изображения {url}: {str(e)}")
+        return None
+
+def create_zip_archive_with_screenshots(df_export, df_cards, gz_name):
+    """
+    Создает ZIP архив с CSV файлом и скриншотами карточек
+    
+    Args:
+        df_export: DataFrame с данными для экспорта в CSV
+        df_cards: DataFrame с данными карточек (для получения screenshot_url)
+        gz_name: Название группы заданий
+        
+    Returns:
+        bytes: Содержимое ZIP архива
+    """
+    # Создаем буфер для ZIP архива
+    zip_buffer = io.BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        # Добавляем CSV файл
+        csv_buffer = io.StringIO()
+        df_export.to_csv(csv_buffer, index=False, encoding='utf-8-sig')
+        csv_data = csv_buffer.getvalue()
+        
+        safe_gz_name = "".join(c for c in gz_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+        csv_filename = f"gz_{safe_gz_name}_data.csv"
+        zip_file.writestr(csv_filename, csv_data.encode('utf-8-sig'))
+        
+        # Создаем папку для скриншотов в архиве
+        screenshots_folder = "screenshots/"
+        
+        # Скачиваем и добавляем скриншоты
+        success_count = 0
+        error_count = 0
+        
+        for _, card_row in df_cards.iterrows():
+            card_id = int(card_row.get("card_id", 0))
+            
+            # Получаем URL скриншота
+            screenshot_url = get_screenshot_url_gz(card_id)
+            
+            # Скачиваем изображение
+            image_data = download_image_from_url(screenshot_url)
+            
+            if image_data:
+                # Добавляем изображение в архив
+                image_filename = f"{screenshots_folder}{card_id}.png"
+                zip_file.writestr(image_filename, image_data)
+                success_count += 1
+            else:
+                error_count += 1
+        
+        # Добавляем информационный файл о результатах скачивания
+        info_content = f"""Информация о скачивании скриншотов
+Группа заданий: {gz_name}
+Всего карточек: {len(df_cards)}
+Скриншотов успешно скачано: {success_count}
+Ошибок при скачивании: {error_count}
+Дата создания архива: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+"""
+        zip_file.writestr("download_info.txt", info_content.encode('utf-8'))
+    
+    zip_buffer.seek(0)
+    return zip_buffer.getvalue()
+
 def display_csv_download_button_gz(df_cards, engine, field_selection, gz_name):
     """
-    Отображает кнопку для скачивания данных карточек ГЗ в CSV формате
+    Отображает кнопку для скачивания данных карточек ГЗ в CSV формате или ZIP архиве со скриншотами
     
     Args:
         df_cards: DataFrame с данными карточек ГЗ
@@ -1345,33 +1445,53 @@ def display_csv_download_button_gz(df_cards, engine, field_selection, gz_name):
             st.warning("Выберите хотя бы одно поле для экспорта")
             return
         
-        # Конвертируем в CSV
-        csv_buffer = io.StringIO()
-        df_export.to_csv(csv_buffer, index=False, encoding='utf-8-sig')
-        csv_data = csv_buffer.getvalue()
+        # Проверяем, нужно ли включать скриншоты
+        download_screenshots = field_selection.get('download_screenshots', False)
         
-        # Формируем имя файла
-        selected_fields = [k for k, v in field_selection.items() if v]
+        # Формируем базовые параметры
+        selected_fields = [k for k, v in field_selection.items() if v and k != 'download_screenshots']
         field_count = len(selected_fields)
         cards_count = len(df_cards)
-        
-        # Сокращаем имя файла, чтобы оно не было слишком длинным
         safe_gz_name = "".join(c for c in gz_name if c.isalnum() or c in (' ', '-', '_')).rstrip()[:20]
-        if field_count <= 5:
-            fields_suffix = "_".join(selected_fields[:5])
+        
+        if download_screenshots:
+            # Создаем ZIP архив с CSV и скриншотами
+            with st.spinner("Создание архива со скриншотами... Это может занять некоторое время."):
+                zip_data = create_zip_archive_with_screenshots(df_export, df_cards, gz_name)
+            
+            # Формируем имя архива
+            filename = f"gz_{safe_gz_name}_{cards_count}_cards_with_screenshots.zip"
+            
+            # Отображаем кнопку скачивания архива
+            st.download_button(
+                label=f"📦 Скачать архив ГЗ ({cards_count} карточек, {field_count} полей + скриншоты)",
+                data=zip_data,
+                file_name=filename,
+                mime="application/zip",
+                help=f"Экспортировать {field_count} выбранных полей для {cards_count} карточек + файлы скриншотов в ZIP архиве"
+            )
         else:
-            fields_suffix = f"{field_count}_fields"
-        
-        filename = f"gz_{safe_gz_name}_{cards_count}_cards_{fields_suffix}.csv"
-        
-        # Отображаем кнопку скачивания
-        st.download_button(
-            label=f"📥 Скачать данные ГЗ ({cards_count} карточек, {field_count} полей)",
-            data=csv_data,
-            file_name=filename,
-            mime="text/csv",
-            help=f"Экспортировать {field_count} выбранных полей для {cards_count} карточек"
-        )
+            # Обычный CSV экспорт
+            csv_buffer = io.StringIO()
+            df_export.to_csv(csv_buffer, index=False, encoding='utf-8-sig')
+            csv_data = csv_buffer.getvalue()
+            
+            # Формируем имя файла
+            if field_count <= 5:
+                fields_suffix = "_".join(selected_fields[:5])
+            else:
+                fields_suffix = f"{field_count}_fields"
+            
+            filename = f"gz_{safe_gz_name}_{cards_count}_cards_{fields_suffix}.csv"
+            
+            # Отображаем кнопку скачивания
+            st.download_button(
+                label=f"📥 Скачать данные ГЗ ({cards_count} карточек, {field_count} полей)",
+                data=csv_data,
+                file_name=filename,
+                mime="text/csv",
+                help=f"Экспортировать {field_count} выбранных полей для {cards_count} карточек"
+            )
         
     except Exception as e:
         st.error(f"Ошибка при подготовке данных для экспорта: {str(e)}")
