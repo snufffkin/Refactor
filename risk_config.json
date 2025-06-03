@@ -4,11 +4,11 @@
         "medium": 0.15
     },
     "success_rate": {
-        "boring": 0.95,
-        "optimal_high": 0.95,
-        "optimal_low": 0.75,
-        "suboptimal_low": 0.5,
-        "too_easy": 0.95
+        "boring": 0.90,
+        "optimal_high": 0.9,
+        "optimal_low": 0.8,
+        "suboptimal_low": 0.65,
+        "too_easy": 0.90
     },
     "complaints": {
         "critical": 50,

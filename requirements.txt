@@ -24,4 +24,6 @@ tiktoken>=0.6.0
 watchfiles>=0.20.0
 sentence-transformers>=2.6.0
 pandas==2.1.4
-openpyxl==3.1.2 
+openpyxl==3.1.2
+openai>=1.0.0
+psycopg2-binary>=2.9.0 

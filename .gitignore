@@ -39,3 +39,6 @@ data/**
 *.tiff
 *.dump
 *.sql
+
+
+analyze_cards_content.py

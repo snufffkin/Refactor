@@ -805,8 +805,30 @@ def page_gz(df_cards_input: pd.DataFrame, eng, create_link_fn=None):
                 special_flags.append(f"📊 Подлость: {level_text}")
         if card.get("discrimination_avg", 0) < 0.15:
             special_flags.append("📉 Низкая дискриминативность")
-        if card.get("complaint_rate", 0) > 0.05:
-            special_flags.append("⚠️ Жалобы")
+
+        # Флаги для успешности
+        success_rate = card.get("success_rate")
+        if pd.notna(success_rate):
+            if success_rate < 0.65: # suboptimal_low from risk_config.json
+                special_flags.append(f"📉 Низкая успешность: {success_rate:.0%}")
+            elif success_rate >= 0.95: # too_easy from risk_config.json
+                special_flags.append(f"🥱 Слишком легко: {success_rate:.0%}")
+
+        # Получаем complaints_total, если есть, иначе рассчитываем
+        complaints_total = card.get("complaints_total")
+        if pd.isna(complaints_total):
+            complaint_rate = card.get("complaint_rate", 0)
+            total_attempts = card.get("total_attempts", 0)
+            if pd.notna(complaint_rate) and pd.notna(total_attempts) and total_attempts > 0:
+                complaints_total = complaint_rate * total_attempts
+            else:
+                complaints_total = 0 # Если не можем рассчитать, считаем 0
+
+        if complaints_total >= 50: # Используем порог из risk_config.json
+            special_flags.append(f"⚠️ Жалобы: {int(complaints_total)}")
+        elif complaints_total >= 10: # Порог "high"
+             special_flags.append(f"🟡 Жалобы: {int(complaints_total)}")
+
         if special_flags:
             st.caption(" | ".join(special_flags))
     
