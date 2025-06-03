@@ -16,12 +16,69 @@ import requests
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 import math
+from sqlalchemy import text # Existing or added import
+import os # Add this import
+from dotenv import load_dotenv # Add this import
 
 import core
 from components.utils import create_hierarchical_header, display_clickable_items, add_gz_links
 from components.metrics import display_metrics_row, display_status_chart, display_risk_distribution
 from components.charts import display_cards_chart, display_risk_bar_chart, display_metrics_comparison, display_success_complaints_chart, display_completion_radar, display_trickiness_chart, display_trickiness_success_chart
 import navigation_utils
+from analyze_bad_cards import analyze_single_gz # Add this import
+
+def get_gz_ai_recommendation_details(engine, gz_id: int):
+    """
+    Получает последнюю AI рекомендацию и ее метаданные для указанного gz_id.
+    Возвращает словарь {'recommendation': str, 'model': str, 'prompt_v': str, 'created_at': datetime, 'error': str} или None.
+    """
+    if gz_id is None:
+        return None
+
+    query = text("""
+        SELECT gz_ai_recommendation, ai_model_version, prompt_version, created_at
+        FROM gz_ai_recommendations
+        WHERE gz_id = :gz_id
+        ORDER BY created_at DESC
+        LIMIT 1;
+    """)
+    try:
+        with engine.connect() as connection:
+            result = connection.execute(query, {"gz_id": gz_id}).fetchone()
+            if result and result[0]: # Check if recommendation text (result[0]) exists
+                raw_text = result[0]
+                processed_text = raw_text.strip() # Remove leading/trailing whitespace from the whole string first
+
+                if processed_text.startswith("```markdown"):
+                    processed_text = processed_text[len("```markdown"):].strip()
+                    if processed_text.endswith("```"):
+                        processed_text = processed_text[:-len("```")].strip()
+                elif processed_text.startswith("```"):
+                    processed_text = processed_text[len("```"):].strip()
+                    if processed_text.endswith("```"):
+                        processed_text = processed_text[:-len("```")].strip()
+                
+                recommendation_text = processed_text
+
+                if not recommendation_text.strip(): # If after stripping, it's empty
+                    return {
+                        "recommendation": "Анализ от ИИ пуст.",
+                        "model": result[1],
+                        "prompt_v": result[2],
+                        "created_at": result[3]
+                    }
+
+                return {
+                    "recommendation": recommendation_text,
+                    "model": result[1],
+                    "prompt_v": result[2],
+                    "created_at": result[3]
+                }
+            else: # No recommendation found or gz_ai_recommendation column is empty/NULL
+                return None
+    except Exception as e:
+        print(f"Ошибка при получении AI рекомендации для GZ ID {gz_id}: {e}")
+        return {"error": f"Ошибка при загрузке AI анализа: {str(e)}"}
 
 def get_cards_content_data(engine, card_ids):
     """
@@ -634,13 +691,16 @@ def page_gz(df_cards_input: pd.DataFrame, eng, create_link_fn=None):
     st.subheader("📊 Детальное сравнение карточек")
     
     # Создаем вкладки для разных представлений
-    tabs = st.tabs([
+    tab_titles = [
         "Ключевые метрики", 
         "Успешность и жалобы", 
         "Типы карточек", 
         "Трики-карточки",
-        "Дискриминативность"
-    ])
+        "Дискриминативность",
+        "🤖 AI-анализ"  # Новая вкладка
+    ]
+    
+    tabs = st.tabs(tab_titles)
     
     with tabs[0]:
         # График сравнения нескольких метрик для карточек
@@ -1040,6 +1100,105 @@ def page_gz(df_cards_input: pd.DataFrame, eng, create_link_fn=None):
                 if len(unique_low_discr_cards_for_buttons_list) > 12:
                     st.info(f"И еще {len(unique_low_discr_cards_for_buttons_list) - 12} карточек...")
     
+    # Новая вкладка для AI анализа
+    with tabs[5]:
+        st.markdown("### 🤖 AI-анализ группы заданий")
+        current_gz_id_for_ai = None
+        # Сначала попытаемся получить OPENAI_API_KEY
+        load_dotenv() # Загружаем переменные из .env, если есть
+        OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+        if not df_gz.empty and "gz_id" in df_gz.columns:
+            unique_gz_ids = df_gz["gz_id"].dropna().unique()
+            if len(unique_gz_ids) == 1:
+                try:
+                    current_gz_id_for_ai = int(unique_gz_ids[0])
+                except (ValueError, TypeError):
+                    st.error(f"GZ ID '{unique_gz_ids[0]}' имеет неверный формат. Невозможно загрузить AI анализ.")
+            elif len(unique_gz_ids) == 0:
+                 st.warning("Не найдено GZ ID в данных этой группы заданий. AI анализ недоступен.")
+            else: # More than one GZ ID found
+                st.warning(f"Обнаружено несколько GZ ID ({unique_gz_ids}) для этой группы. AI анализ может быть нерелевантен или будет показан для первого ({unique_gz_ids[0]}).")
+                try:
+                    current_gz_id_for_ai = int(unique_gz_ids[0]) # Fallback to first one
+                except (ValueError, TypeError):
+                     st.error(f"GZ ID '{unique_gz_ids[0]}' имеет неверный формат. Невозможно загрузить AI анализ.")
+        else:
+            st.warning("Данные о GZ (df_gz) пусты или отсутствует колонка 'gz_id'. AI анализ недоступен.")
+
+        if current_gz_id_for_ai is not None:
+            # Ключ для session_state, чтобы отслеживать, был ли запущен анализ для этого GZ
+            analysis_triggered_key = f"ai_analysis_triggered_for_{current_gz_id_for_ai}"
+            analysis_result_key = f"ai_analysis_result_for_{current_gz_id_for_ai}"
+
+            analysis_details = get_gz_ai_recommendation_details(eng, current_gz_id_for_ai)
+            
+            if analysis_details and "error" not in analysis_details:
+                created_at_display = 'N/A'
+                if analysis_details.get('created_at'):
+                    try:
+                        created_at_display = analysis_details['created_at'].strftime('%Y-%m-%d %H:%M:%S')
+                    except AttributeError:
+                        created_at_display = str(analysis_details['created_at'])
+                
+                st.markdown(f"**Модель ИИ:** `{analysis_details.get('model', 'N/A')}` | "
+                            f"**Версия промпта:** `{analysis_details.get('prompt_v', 'N/A')}` | "
+                            f"**Дата анализа:** `{created_at_display}`")
+                st.markdown("---")
+                if analysis_details["recommendation"] == "Анализ от ИИ пуст.":
+                    st.info(analysis_details["recommendation"])
+                else:
+                    st.markdown(analysis_details["recommendation"], unsafe_allow_html=True)
+            else: # Нет анализа или была ошибка при загрузке
+                if analysis_details and "error" in analysis_details:
+                    st.error(analysis_details["error"])
+                else:
+                    st.info("Анализ от ИИ для этой группы заданий еще не проводился или отсутствует.")
+                
+                if not OPENAI_API_KEY:
+                    st.warning("Ключ OPENAI_API_KEY не найден. Функция запуска анализа недоступна.")
+                else:
+                    if st.button("🚀 Выполнить AI-анализ", key=f"run_ai_analysis_gz_{current_gz_id_for_ai}"):
+                        st.session_state[analysis_triggered_key] = True
+                        st.session_state[analysis_result_key] = None # Сбрасываем предыдущий результат на всякий случай
+                        
+                        with st.spinner(f"Выполняется AI-анализ для GZ ID {current_gz_id_for_ai}... Это может занять некоторое время."):
+                            try:
+                                result_text = analyze_single_gz(gz_id=current_gz_id_for_ai, engine=eng, api_key=OPENAI_API_KEY)
+                                st.session_state[analysis_result_key] = result_text
+                                # После успешного анализа и сохранения в БД, перезагружаем страницу, 
+                                # чтобы get_gz_ai_recommendation_details() забрала свежие данные.
+                                st.success(f"Анализ для GZ ID {current_gz_id_for_ai} завершен и сохранен!")
+                                # st.rerun() # Можно сразу перезагрузить
+                            except Exception as e_analyze:
+                                error_msg = f"Ошибка при выполнении AI-анализа: {str(e_analyze)}"
+                                st.session_state[analysis_result_key] = error_msg
+                                st.error(error_msg)
+                        st.rerun() # Перезагрузка для отображения результата или ошибки из БД/session_state
+            
+            # Если анализ был запущен и есть результат в session_state (на случай если rerun не сработал как ожидалось)
+            if st.session_state.get(analysis_triggered_key) and st.session_state.get(analysis_result_key):
+                # Этот блок может быть не нужен, если rerun() всегда отрабатывает корректно
+                # и get_gz_ai_recommendation_details() подхватывает свежие данные.
+                # Оставляем для отладки или как fallback.
+                res_text = st.session_state.get(analysis_result_key)
+                if "Ошибка:" in res_text:
+                    st.error(f"Результат попытки анализа: {res_text}")
+                # else:
+                    # st.markdown("### Результат только что выполненного анализа:")
+                    # st.markdown(res_text, unsafe_allow_html=True) # Сырой markdown
+                # Сбрасываем флаг, чтобы не показывать это сообщение постоянно
+                # st.session_state[analysis_triggered_key] = False 
+                # st.session_state[analysis_result_key] = None
+
+        elif not (not df_gz.empty and "gz_id" in df_gz.columns and len(df_gz["gz_id"].dropna().unique()) == 0):
+            if not df_gz.empty and "gz_id" not in df_gz.columns:
+                 pass 
+            elif df_gz.empty:
+                 pass 
+            else: 
+                 st.warning("Не удалось определить GZ ID для загрузки AI анализа.")
+
     # 5. Таблица с карточками и ссылками на карточки
     st.subheader("📋 Детальная информация по карточкам")
     
