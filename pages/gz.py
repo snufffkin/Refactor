@@ -313,7 +313,7 @@ def display_card_list_modern(df_cards, engine, status_color_map, status_icon_map
     card_render_data = []
     for _, card_data_row in df_cards.sort_values("card_order").iterrows():
         card_id = int(card_data_row["card_id"])
-        risk = card_data_row["risk"]
+        # risk = card_data_row["risk"] # Original line for risk
         card_type = card_data_row["card_type"]
         card_order = int(card_data_row["card_order"])
         current_card_status = card_data_row.get("status", "unknown")
@@ -322,38 +322,69 @@ def display_card_list_modern(df_cards, engine, status_color_map, status_icon_map
         else:
             current_card_status = str(current_card_status)
         
+        # --- Consolidated numeric value handling ---
+        # Handle risk
+        risk_raw = card_data_row.get("risk") # Changed from direct access to .get()
+        risk_num = float(risk_raw) if risk_raw is not None else 0.0
+
+        # Handle trickiness_level
+        trickiness_level_raw = card_data_row.get("trickiness_level")
+        trickiness_level_num = int(trickiness_level_raw) if trickiness_level_raw is not None else 0
+
+        # Handle discrimination_avg
+        discrimination_avg_raw = card_data_row.get("discrimination_avg")
+        discrimination_avg_num = float(discrimination_avg_raw) if discrimination_avg_raw is not None else 0.0
+        
+        # Handle success_rate (value remains raw for pd.notna checks)
+        success_rate_raw = card_data_row.get("success_rate")
+
+        # Handle complaints_total
+        complaints_total_raw = card_data_row.get("complaints_total")
+        complaints_total_num = 0.0 # Default value
+        if pd.isna(complaints_total_raw):
+            complaint_rate_for_calc_raw = card_data_row.get("complaint_rate")
+            complaint_rate_for_calc_num = float(complaint_rate_for_calc_raw) if complaint_rate_for_calc_raw is not None else 0.0
+            
+            total_attempts_for_calc_raw = card_data_row.get("total_attempts")
+            total_attempts_for_calc_num = int(total_attempts_for_calc_raw) if total_attempts_for_calc_raw is not None else 0
+            
+            if total_attempts_for_calc_num > 0:
+                complaints_total_num = complaint_rate_for_calc_num * total_attempts_for_calc_num
+            # else complaints_total_num remains 0.0
+        else:
+            complaints_total_num = float(complaints_total_raw) if complaints_total_raw is not None else 0.0
+        
+        # Handle time_median (value remains raw for pd.notna checks)
+        time_median_raw = card_data_row.get("time_median")
+        # --- End of consolidated numeric value handling ---
+        
         content_data = cards_content_data.get(card_id, {})
         screenshot_url = get_screenshot_url(card_id)
         status_color = status_color_map.get(current_card_status, "#808080")
         status_text = current_card_status.capitalize()
         
         special_flags = []
-        if card_data_row.get("trickiness_level", 0) > 0:
-            level_text = trickiness_categories.get(int(card_data_row["trickiness_level"]), "")
+        if trickiness_level_num > 0: # Use trickiness_level_num
+            level_text = trickiness_categories.get(trickiness_level_num, "") # trickiness_level_num is int
             if level_text:
                 special_flags.append(f"📊 Подлость: {level_text}")
-        if card_data_row.get("discrimination_avg", 0) < 0.15:
+        
+        if discrimination_avg_num < 0.15: # Use discrimination_avg_num
             special_flags.append("📉 Низкая дискриминативность")
-        success_rate = card_data_row.get("success_rate")
-        if pd.notna(success_rate):
-            if success_rate < 0.65:
-                special_flags.append(f"📉 Низкая успешность: {success_rate:.0%}")
-            elif success_rate >= 0.95:
-                special_flags.append(f"🥱 Слишком легко: {success_rate:.0%}")
         
-        complaints_total = card_data_row.get("complaints_total")
-        if pd.isna(complaints_total):
-            complaint_rate = card_data_row.get("complaint_rate", 0)
-            total_attempts = card_data_row.get("total_attempts", 0)
-            if pd.notna(complaint_rate) and pd.notna(total_attempts) and total_attempts > 0:
-                complaints_total = complaint_rate * total_attempts
-            else:
-                complaints_total = 0
+        success_rate = success_rate_raw # Keep using success_rate variable name as per original for display if preferred
+        if pd.notna(success_rate_raw): # Use success_rate_raw for check
+            if success_rate_raw < 0.65:
+                special_flags.append(f"📉 Низкая успешность: {success_rate_raw:.0%}")
+            elif success_rate_raw >= 0.95:
+                special_flags.append(f"🥱 Слишком легко: {success_rate_raw:.0%}")
         
-        if complaints_total >= 50:
-            special_flags.append(f"⚠️ Жалобы: {int(complaints_total)}")
-        elif complaints_total >= 10:
-            special_flags.append(f"🟡 Жалобы: {int(complaints_total)}")
+        # complaints_total_num is already calculated and is a number
+        complaints_total = complaints_total_num # Keep using complaints_total variable name for display if preferred
+        if complaints_total_num >= 50:
+            special_flags.append(f"⚠️ Жалобы: {int(complaints_total_num)}")
+        elif complaints_total_num >= 10:
+            special_flags.append(f"🟡 Жалобы: {int(complaints_total_num)}")
             
         card_description = content_data.get('card_description', '')
         card_complaints_text = content_data.get('card_complaints', '')
@@ -370,13 +401,13 @@ def display_card_list_modern(df_cards, engine, status_color_map, status_icon_map
         if card_complaints_text and card_complaints_text.strip():
             complaints_html_str = f'<div class="complaints-box"><strong>Суть жалоб:</strong> {card_complaints_text}</div>'
         
-        success_display_str = f"{success_rate:.0%}" if pd.notna(success_rate) else "N/A"
-        discrimination_display_str = f"{card_data_row.get('discrimination_avg', 0):.2f}"
-        complaints_display_str = f"{int(complaints_total)}"
-        risk_display_str = f"{risk:.2f}"
+        success_display_str = f"{success_rate_raw:.0%}" if pd.notna(success_rate_raw) else "N/A" # Use success_rate_raw
+        discrimination_display_str = f"{discrimination_avg_num:.2f}" # Use discrimination_avg_num
+        complaints_display_str = f"{int(complaints_total_num)}" # Use complaints_total_num
+        risk_display_str = f"{risk_num:.2f}" # Use risk_num
         
-        time_median_val = card_data_row.get("time_median")
-        time_median_display_str = f"{time_median_val:.1f}" if pd.notna(time_median_val) else "N/A"
+        time_median_val = time_median_raw # Keep using time_median_val if preferred for display logic
+        time_median_display_str = f"{time_median_raw:.1f}" if pd.notna(time_median_raw) else "N/A" # Use time_median_raw
         
         card_html_content = f"""
         <div class="card-container">
