@@ -22,8 +22,8 @@
     },
     "weights": {
         "complaint_rate": 0.35,
-        "success_rate": 0.25,
-        "discrimination": 0.2,
+        "success_rate": 0.4,
+        "discrimination": 0.05,
         "trickiness": 0.15,
         "attempted": 0.05
     },

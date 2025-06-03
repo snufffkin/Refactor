@@ -23,6 +23,382 @@ from components.metrics import display_metrics_row, display_status_chart, displa
 from components.charts import display_cards_chart, display_risk_bar_chart, display_metrics_comparison, display_success_complaints_chart, display_completion_radar, display_trickiness_chart, display_trickiness_success_chart
 import navigation_utils
 
+def get_cards_content_data(engine, card_ids):
+    """
+    Получает данные из таблицы cards_content для указанных карточек
+    
+    Args:
+        engine: движок базы данных
+        card_ids: список ID карточек
+    
+    Returns:
+        dict: словарь с данными карточек, где ключ - card_id
+    """
+    if not card_ids:
+        return {}
+    
+    # Создаем список ID для SQL запроса
+    id_list = ','.join(map(str, card_ids))
+    
+    query = f"""
+    SELECT 
+        card_id,
+        card_description,
+        card_complaints,
+        text_blocks,
+        media,
+        interactives
+    FROM cards_content
+    WHERE card_id IN ({id_list})
+    """
+    
+    try:
+        # Проверяем, что engine имеет необходимые методы для SQL запросов
+        if hasattr(engine, 'execute') or hasattr(engine, 'connect'):
+            df = pd.read_sql(query, engine)
+            # Преобразуем в словарь для быстрого доступа
+            content_dict = {}
+            for _, row in df.iterrows():
+                content_dict[row['card_id']] = {
+                    'card_description': row.get('card_description', ''),
+                    'card_complaints': row.get('card_complaints', ''),
+                    'text_blocks': row.get('text_blocks', ''),
+                    'media': row.get('media', ''),
+                    'interactives': row.get('interactives', '')
+                }
+            return content_dict
+        else:
+            # Возвращаем пустые данные для тестового engine
+            return {card_id: {
+                'card_description': f'Тестовое описание для карточки {card_id}',
+                'card_complaints': f'Тестовые жалобы для карточки {card_id}' if card_id % 2 == 0 else '',
+                'text_blocks': '',
+                'media': '',
+                'interactives': ''
+            } for card_id in card_ids}
+    except Exception as e:
+        print(f"Ошибка при получении данных из cards_content: {e}")
+        # Возвращаем тестовые данные при ошибке
+        return {card_id: {
+            'card_description': f'Описание недоступно для карточки {card_id}',
+            'card_complaints': '',
+            'text_blocks': '',
+            'media': '',
+            'interactives': ''
+        } for card_id in card_ids}
+
+def get_screenshot_url(card_id):
+    """
+    Получает URL скриншота карточки
+    
+    Args:
+        card_id: ID карточки
+    
+    Returns:
+        str: URL скриншота
+    """
+    return f"https://snufffkin-pics.website.yandexcloud.net/Refactor/image/{card_id}.png"
+
+def display_card_list_modern(df_cards, engine, status_color_map, status_icon_map, trickiness_categories):
+    """
+    Отображает список карточек в компактном HTML стиле
+    
+    Args:
+        df_cards: DataFrame с данными карточек
+        engine: движок базы данных
+        status_color_map: словарь цветов для статусов
+        status_icon_map: словарь иконок для статусов
+        trickiness_categories: словарь категорий подлости
+    """
+    st.subheader("🔍 Все карточки в группе заданий")
+    
+    # Получаем данные из cards_content
+    card_ids = df_cards["card_id"].dropna().unique().tolist()
+    cards_content_data = get_cards_content_data(engine, card_ids)
+    
+    # HTML стили остаются здесь же
+    cards_styles_html = """
+    <style>
+    .card-container {
+        border: 1px solid #444; /* Darker border for dark theme */
+        border-radius: 8px;
+        margin-bottom: 10px; /* Reduced margin as button will be separate */
+        background: #2e2e2e; /* Dark background for card */
+        box-shadow: 0 1px 3px rgba(0,0,0,0.3); /* Adjusted shadow for dark theme */
+        overflow: hidden;
+        width: 100%; /* Will be controlled by st.columns */
+        /* min-width: 320px; */ /* Minimum width before wrapping if not using fixed columns */
+        display: flex;
+        flex-direction: column; /* Vertical layout */
+        height: 100%; /* Fill column height */
+    }
+    .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 12px; /* Reduced padding */
+        background: #3a3a3a; /* Darker header background */
+        border-bottom: 1px solid #444; /* Darker border */
+    }
+    .card-title {
+        font-weight: bold;
+        font-size: 14px; /* Reduced font size */
+        margin: 0;
+        color: #e0e0e0; /* Light text for dark theme */
+    }
+    .status-badge {
+        padding: 3px 10px; /* Reduced padding */
+        border-radius: 10px; /* Adjusted radius */
+        color: white;
+        font-size: 11px; /* Reduced font size */
+        font-weight: bold;
+        text-transform: uppercase;
+    }
+    .card-body {
+        display: flex;
+        flex-direction: column; /* Content flows vertically */
+        padding: 12px; /* Reduced padding */
+        gap: 10px; /* Reduced gap */
+        flex-grow: 1; /* Body takes available space */
+    }
+    .screenshot-section {
+        width: 100%;
+        margin-bottom: 10px; /* Space below screenshot */
+    }
+    .screenshot-box {
+        width: 100%; /* Full width of parent */
+        height: 200px; /* Adjusted height */
+        background: #404040; /* Darker background for screenshot area */
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #c0c0c0; /* Lighter text for dark theme */
+        font-weight: bold;
+        font-size: 13px; /* Reduced font size */
+        text-align: center;
+        overflow: hidden;
+    }
+    .screenshot-img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain; /* Ensure whole image is visible */
+        border-radius: 6px;
+    }
+    .content-section {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 8px; /* Reduced gap */
+    }
+    .flags-row {
+        margin-bottom: 8px; /* Reduced margin */
+        font-size: 12px; /* Reduced font size */
+        color: #b0b0b0; /* Lighter text */
+        word-break: break-word; /* Prevent overflow */
+    }
+    .description-box {
+        background: #3a3a3a; /* Darker background */
+        padding: 6px 10px; /* Reduced padding */
+        border-radius: 4px;
+        border-left: 3px solid #007bff; /* Keep accent color */
+        margin: 0; /* Removed margin for tighter layout */
+        font-size: 12px; /* Reduced font size */
+        line-height: 1.3; /* Adjusted line height */
+        color: #d0d0d0; /* Lighter text */
+    }
+    .complaints-box {
+        background: #4a4333; /* Darker warning background */
+        padding: 6px 10px; /* Reduced padding */
+        border-radius: 4px;
+        border-left: 3px solid #ffc107; /* Keep accent color */
+        margin: 0; /* Removed margin */
+        font-size: 12px; /* Reduced font size */
+        line-height: 1.3; /* Adjusted line height */
+        color: #d0d0d0; /* Lighter text */
+    }
+    .metrics-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr 1fr 1fr; /* Five columns for metrics */
+        gap: 4px; /* Adjusted gap for more items */
+        margin: 4px 0;
+    }
+    .metric-item {
+        text-align: center;
+        padding: 4px; /* Further reduced padding */
+        background: #3a3a3a; /* Darker background */
+        border-radius: 4px;
+        border: 1px solid #444; /* Darker border */
+    }
+    .metric-value {
+        font-size: 15px; /* Slightly reduced font size */
+        font-weight: bold;
+        color: #e0e0e0; /* Lighter text */
+        display: block;
+    }
+    .metric-label {
+        font-size: 9px; /* Slightly reduced font size */
+        color: #a0a0a0; /* Lighter text */
+        text-transform: uppercase;
+        margin-top: 2px;
+    }
+    .section-title {
+        font-size: 14px;
+        font-weight: bold;
+        margin: 10px 0 6px 0;
+        color: #e0e0e0; /* Light text for dark theme */
+    }
+    </style>
+    """
+    st.html(cards_styles_html) # Рендерим стили один раз
+
+    # Собираем данные для карточек и кнопок
+    card_render_data = []
+    for _, card_data_row in df_cards.sort_values("card_order").iterrows():
+        card_id = int(card_data_row["card_id"])
+        risk = card_data_row["risk"]
+        card_type = card_data_row["card_type"]
+        card_order = int(card_data_row["card_order"])
+        current_card_status = card_data_row.get("status", "unknown")
+        if pd.isna(current_card_status):
+            current_card_status = "unknown"
+        else:
+            current_card_status = str(current_card_status)
+        
+        content_data = cards_content_data.get(card_id, {})
+        screenshot_url = get_screenshot_url(card_id)
+        status_color = status_color_map.get(current_card_status, "#808080")
+        status_text = current_card_status.capitalize()
+        
+        special_flags = []
+        if card_data_row.get("trickiness_level", 0) > 0:
+            level_text = trickiness_categories.get(int(card_data_row["trickiness_level"]), "")
+            if level_text:
+                special_flags.append(f"📊 Подлость: {level_text}")
+        if card_data_row.get("discrimination_avg", 0) < 0.15:
+            special_flags.append("📉 Низкая дискриминативность")
+        success_rate = card_data_row.get("success_rate")
+        if pd.notna(success_rate):
+            if success_rate < 0.65:
+                special_flags.append(f"📉 Низкая успешность: {success_rate:.0%}")
+            elif success_rate >= 0.95:
+                special_flags.append(f"🥱 Слишком легко: {success_rate:.0%}")
+        
+        complaints_total = card_data_row.get("complaints_total")
+        if pd.isna(complaints_total):
+            complaint_rate = card_data_row.get("complaint_rate", 0)
+            total_attempts = card_data_row.get("total_attempts", 0)
+            if pd.notna(complaint_rate) and pd.notna(total_attempts) and total_attempts > 0:
+                complaints_total = complaint_rate * total_attempts
+            else:
+                complaints_total = 0
+        
+        if complaints_total >= 50:
+            special_flags.append(f"⚠️ Жалобы: {int(complaints_total)}")
+        elif complaints_total >= 10:
+            special_flags.append(f"🟡 Жалобы: {int(complaints_total)}")
+            
+        card_description = content_data.get('card_description', '')
+        card_complaints_text = content_data.get('card_complaints', '')
+        
+        flags_html_str = " | ".join(special_flags) if special_flags else ""
+        
+        description_html_str = ""
+        if card_description and card_description.strip():
+            description_html_str = f'<div class="description-box">{card_description}</div>'
+        else:
+            description_html_str = '<div style="font-style: italic; color: #999; font-size: 12px;">Описание отсутствует</div>'
+        
+        complaints_html_str = ""
+        if card_complaints_text and card_complaints_text.strip():
+            complaints_html_str = f'<div class="complaints-box"><strong>Суть жалоб:</strong> {card_complaints_text}</div>'
+        
+        success_display_str = f"{success_rate:.0%}" if pd.notna(success_rate) else "N/A"
+        discrimination_display_str = f"{card_data_row.get('discrimination_avg', 0):.2f}"
+        complaints_display_str = f"{int(complaints_total)}"
+        risk_display_str = f"{risk:.2f}"
+        
+        time_median_val = card_data_row.get("time_median")
+        time_median_display_str = f"{time_median_val:.1f}" if pd.notna(time_median_val) else "N/A"
+        
+        card_html_content = f"""
+        <div class="card-container">
+            <div class="card-header">
+                <div class="card-title">№{card_order} {card_type.upper()}</div>
+                <div class="status-badge" style="background-color: {status_color}">{status_text}</div>
+            </div>
+            <div class="card-body">
+                <div class="screenshot-section">
+                    <div class="screenshot-box">
+                        <img src="{screenshot_url}" class="screenshot-img" 
+                             onerror="this.style.display='none'; this.parentNode.innerHTML='СКРИНШОТ КАРТОЧКИ';" />
+                    </div>
+                </div>
+                <div class="content-section">
+                    {f'<div class="flags-row"><strong>Флаги:</strong> {flags_html_str}</div>' if flags_html_str else ''}
+                    
+                    {description_html_str}
+                    {complaints_html_str}
+                    
+                    <div class="metrics-grid">
+                        <div class="metric-item">
+                            <span class="metric-value">{success_display_str}</span>
+                            <div class="metric-label">Успешность</div>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-value">{discrimination_display_str}</span>
+                            <div class="metric-label">Дискримин.</div>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-value">{complaints_display_str}</span>
+                            <div class="metric-label">Жалобы</div>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-value">{risk_display_str}</span>
+                            <div class="metric-label">Риск</div>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-value">{time_median_display_str}</span>
+                            <div class="metric-label">ВРЕМЯ (сек)</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        """
+        card_render_data.append({
+            "html": card_html_content,
+            "id": card_id,
+            "order": card_order,
+            "status": current_card_status
+        })
+
+    # Рендерим карточки и кнопки в колонках
+    num_columns = 3 # Количество колонок для отображения карточек
+    
+    # Создаем группы карточек по num_columns
+    for i in range(0, len(card_render_data), num_columns):
+        cols = st.columns(num_columns)
+        # Берем срез карточек для текущего ряда
+        row_cards = card_render_data[i:i+num_columns]
+        
+        for idx, card_info in enumerate(row_cards):
+            with cols[idx]:
+                st.html(card_info["html"])
+                button_key = f"modern_card_nav_{card_info['id']}_{card_info['status']}"
+                # Используем use_container_width=True для кнопки, чтобы она заняла ширину колонки
+                if st.button(f"🔗 К карточке №{card_info['order']} (ID: {card_info['id']})", key=button_key, use_container_width=True):
+                    if hasattr(st, 'navigate_to_app'):
+                        st.navigate_to_app("Карточки", card_id=str(card_info['id']))
+                    else:
+                        st.query_params.clear()
+                        st.query_params["page"] = "cards"
+                        st.query_params["card_id"] = str(card_info['id'])
+                    st.rerun()
+    
+    # Старый блок навигации через st.markdown и отдельные st.button больше не нужен
+    # так как кнопки теперь под каждой карточкой.
+
 def page_gz(df_cards_input: pd.DataFrame, eng, create_link_fn=None):
     """Страница группы заданий с детализацией по карточкам"""
     prog_name = st.session_state.get('filter_program')
@@ -743,94 +1119,17 @@ def page_gz(df_cards_input: pd.DataFrame, eng, create_link_fn=None):
     # Отображаем таблицу
     st.dataframe(display_df, hide_index=True, use_container_width=True)
 
-    # 6. Кнопки для быстрого перехода ко всем карточкам, сортированные по card_order
-    st.subheader("🔍 Все карточки в группе заданий")
-
-    for _, card in df_cards.sort_values("card_order").iterrows():
-        card_id = int(card["card_id"])
-        risk = card["risk"]
-        card_type = card["card_type"]
-        card_order = int(card["card_order"])
-        current_card_status = card.get("status", "unknown")
-        if pd.isna(current_card_status):
-            current_card_status = "unknown"
-        else:
-            current_card_status = str(current_card_status)
-        
-        status_color = status_color_map_gz.get(current_card_status, "#808080") # Цвет по умолчанию (серый)
-        status_text = current_card_status.capitalize()
-        
-        # HTML для компактного бейджа
-        # Стили подбираем для компактности и выравнивания
-        badge_html = f"""<span style="
-            background-color: {status_color};
-            color: white;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 0.8em;
-            font-weight: bold;
-            margin-right: 4px;
-            display: inline-block;
-            vertical-align: middle;
-            line-height: 1.2;
-        ">{status_text}</span>"""
-        
-        button_label_text = f"№{card_order}: ID {card_id} - Риск: {risk:.2f} - {card_type}"
-        # Всплывающая подсказка для кнопки может теперь содержать и статус, если нужно, или только доп. инфо
-        button_help = f"Карточка №{card_order}, ID {card_id}, Статус: {status_text}"
-        key = f"gz_card_nav_{card_id}_{current_card_status}" # Добавим статус в ключ для уникальности при обновлении
-
-        # Используем колонки: одна для бейджа, другая для кнопки
-        # Соотношение ширин подбираем экспериментально для компактности
-        col_badge, col_button_text = st.columns([1, 10]) # Уменьшаем первую колонку относительно второй
-
-        with col_badge:
-            st.markdown(badge_html, unsafe_allow_html=True)
-        
-        with col_button_text:
-            if st.button(button_label_text, key=key, help=button_help):
-                if hasattr(st, 'navigate_to_app'):
-                    st.navigate_to_app("Карточки", card_id=str(card_id))
-                else:
-                    st.query_params.clear()
-                    st.query_params["page"] = "cards"
-                    st.query_params["card_id"] = str(card_id)
-                st.rerun()
-
-        # Специальные флаги (этот блок можно оставить или модифицировать)
-        special_flags = []
-        if card.get("trickiness_level", 0) > 0:
-            level_text = trickiness_categories.get(int(card["trickiness_level"]), "")
-            if level_text:
-                special_flags.append(f"📊 Подлость: {level_text}")
-        if card.get("discrimination_avg", 0) < 0.15:
-            special_flags.append("📉 Низкая дискриминативность")
-
-        # Флаги для успешности
-        success_rate = card.get("success_rate")
-        if pd.notna(success_rate):
-            if success_rate < 0.65: # suboptimal_low from risk_config.json
-                special_flags.append(f"📉 Низкая успешность: {success_rate:.0%}")
-            elif success_rate >= 0.95: # too_easy from risk_config.json
-                special_flags.append(f"🥱 Слишком легко: {success_rate:.0%}")
-
-        # Получаем complaints_total, если есть, иначе рассчитываем
-        complaints_total = card.get("complaints_total")
-        if pd.isna(complaints_total):
-            complaint_rate = card.get("complaint_rate", 0)
-            total_attempts = card.get("total_attempts", 0)
-            if pd.notna(complaint_rate) and pd.notna(total_attempts) and total_attempts > 0:
-                complaints_total = complaint_rate * total_attempts
-            else:
-                complaints_total = 0 # Если не можем рассчитать, считаем 0
-
-        if complaints_total >= 50: # Используем порог из risk_config.json
-            special_flags.append(f"⚠️ Жалобы: {int(complaints_total)}")
-        elif complaints_total >= 10: # Порог "high"
-             special_flags.append(f"🟡 Жалобы: {int(complaints_total)}")
-
-        if special_flags:
-            st.caption(" | ".join(special_flags))
+    # 6. Отображение карточек в современном стиле
+    # Определяем категории подлости для передачи в функцию
+    trickiness_categories = {
+        0: "Нет",
+        1: "Низкий",
+        2: "Средний",
+        3: "Высокий"
+    }
+    
+    # Вызываем новую функцию отображения карточек
+    display_card_list_modern(df_cards, eng, status_color_map_gz, status_icon_map_gz, trickiness_categories)
     
     # Создаем список трики-карточек
     tricky_cards = df_cards[df_cards["trickiness_level"] > 0].sort_values("card_order")
