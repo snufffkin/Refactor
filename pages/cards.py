@@ -864,11 +864,17 @@ def display_success_analysis(card_data):
         fig = go.Figure()
         
         # Добавляем столбцы для общей успешности и успеха с первой попытки
+        success_rate = card_data["success_rate"] if card_data["success_rate"] is not None else 0
+        first_try_rate = card_data["first_try_success_rate"] if card_data["first_try_success_rate"] is not None else 0
+        
         fig.add_trace(go.Bar(
             x=["Общая успешность", "Успех с первой попытки"],
-            y=[card_data["success_rate"], card_data["first_try_success_rate"]],
+            y=[success_rate, first_try_rate],
             marker_color=["#4da6ff", "#ff9040"],
-            text=[f"{card_data['success_rate']:.1%}", f"{card_data['first_try_success_rate']:.1%}"],
+            text=[
+                f"{success_rate:.1%}" if success_rate is not None else "Нет данных",
+                f"{first_try_rate:.1%}" if first_try_rate is not None else "Нет данных"
+            ],
             textposition="auto"
         ))
         
@@ -931,24 +937,30 @@ def display_success_analysis(card_data):
     st.markdown("### Интерпретация данных успешности")
     
     success_interpretation = ""
-    if card_data["success_rate"] > 0.95:
-        success_interpretation = "Карточка имеет **очень высокую общую успешность** (>95%), что может указывать на то, что она слишком простая."
-    elif card_data["success_rate"] > 0.8:
-        success_interpretation = "Карточка имеет **высокую общую успешность** (>80%), что является хорошим показателем."
-    elif card_data["success_rate"] > 0.6:
-        success_interpretation = "Карточка имеет **среднюю общую успешность** (>60%), что является приемлемым значением."
+    if card_data["success_rate"] is not None:
+        if card_data["success_rate"] > 0.95:
+            success_interpretation = "Карточка имеет **очень высокую общую успешность** (>95%), что может указывать на то, что она слишком простая."
+        elif card_data["success_rate"] > 0.8:
+            success_interpretation = "Карточка имеет **высокую общую успешность** (>80%), что является хорошим показателем."
+        elif card_data["success_rate"] > 0.6:
+            success_interpretation = "Карточка имеет **среднюю общую успешность** (>60%), что является приемлемым значением."
+        else:
+            success_interpretation = "Карточка имеет **низкую общую успешность** (<60%), что может указывать на её чрезмерную сложность или недостаточно ясную формулировку."
     else:
-        success_interpretation = "Карточка имеет **низкую общую успешность** (<60%), что может указывать на её чрезмерную сложность или недостаточно ясную формулировку."
+        success_interpretation = "Данные об общей успешности отсутствуют."
     
     first_try_interpretation = ""
-    if card_data["first_try_success_rate"] > 0.9:
-        first_try_interpretation = "**Очень высокая успешность с первой попытки** (>90%) указывает на то, что задание слишком простое."
-    elif card_data["first_try_success_rate"] > 0.7:
-        first_try_interpretation = "**Высокая успешность с первой попытки** (>70%) говорит о том, что задание интуитивно понятно."
-    elif card_data["first_try_success_rate"] > 0.5:
-        first_try_interpretation = "**Средняя успешность с первой попытки** (>50%) показывает хороший баланс сложности."
+    if card_data["first_try_success_rate"] is not None:
+        if card_data["first_try_success_rate"] > 0.9:
+            first_try_interpretation = "**Очень высокая успешность с первой попытки** (>90%) указывает на то, что задание слишком простое."
+        elif card_data["first_try_success_rate"] > 0.7:
+            first_try_interpretation = "**Высокая успешность с первой попытки** (>70%) говорит о том, что задание интуитивно понятно."
+        elif card_data["first_try_success_rate"] > 0.5:
+            first_try_interpretation = "**Средняя успешность с первой попытки** (>50%) показывает хороший баланс сложности."
+        else:
+            first_try_interpretation = "**Низкая успешность с первой попытки** (<50%) указывает на то, что студентам требуется несколько попыток для понимания задания."
     else:
-        first_try_interpretation = "**Низкая успешность с первой попытки** (<50%) указывает на то, что студентам требуется несколько попыток для понимания задания."
+        first_try_interpretation = "Данные об успешности с первой попытки отсутствуют."
     
     diff_interpretation = ""
     # Используем card_data.get("success_diff") с проверкой на pd.notna, так как теперь это может быть np.nan
@@ -1001,7 +1013,9 @@ def display_complaints_analysis(card_data):
     if "complaints_total" in card_data:
         complaints_total = card_data["complaints_total"]
     elif "complaint_rate" in card_data and "total_attempts" in card_data:
-        complaints_total = card_data["complaint_rate"] * card_data["total_attempts"]
+        complaint_rate = card_data["complaint_rate"] or 0
+        total_attempts = card_data["total_attempts"] or 0
+        complaints_total = complaint_rate * total_attempts
     
     # Создаем колонки для разных показателей
     col1, col2 = st.columns(2)
@@ -1034,11 +1048,13 @@ def display_complaints_analysis(card_data):
         fig = go.Figure()
         
         # Добавляем столбец для доли жалоб
+        complaint_rate = card_data["complaint_rate"] if card_data["complaint_rate"] is not None else 0
+        
         fig.add_trace(go.Bar(
             x=["Доля жалоб"],
-            y=[card_data["complaint_rate"]],
+            y=[complaint_rate],
             marker_color="#ff6666",
-            text=[f"{card_data['complaint_rate']:.1%}"],
+            text=[f"{complaint_rate:.1%}" if complaint_rate is not None else "Нет данных"],
             textposition="auto"
         ))
         
@@ -1048,7 +1064,7 @@ def display_complaints_analysis(card_data):
             yaxis=dict(
                 title="Доля",
                 tickformat=".0%",
-                range=[0, max(0.25, card_data["complaint_rate"] * 1.5)]
+                range=[0, max(0.25, (card_data["complaint_rate"] or 0) * 1.5)]
             )
         )
         
@@ -1068,19 +1084,22 @@ def display_complaints_analysis(card_data):
         complaints_interpretation = f"Карточка имеет **низкое количество жалоб** ({complaints_total:.0f}), что является хорошим показателем."
     
     complaint_rate_interpretation = ""
-    if card_data["complaint_rate"] > 0.1:
-        complaint_rate_interpretation = f"**Высокая доля жалоб** ({card_data['complaint_rate']:.1%}) указывает на то, что значительная часть студентов испытывает проблемы с заданием."
-    elif card_data["complaint_rate"] > 0.05:
-        complaint_rate_interpretation = f"**Средняя доля жалоб** ({card_data['complaint_rate']:.1%}) говорит о наличии некоторых проблем с заданием, но не критичных."
+    if card_data["complaint_rate"] is not None:
+        if card_data["complaint_rate"] > 0.1:
+            complaint_rate_interpretation = f"**Высокая доля жалоб** ({card_data['complaint_rate']:.1%}) указывает на то, что значительная часть студентов испытывает проблемы с заданием."
+        elif card_data["complaint_rate"] > 0.05:
+            complaint_rate_interpretation = f"**Средняя доля жалоб** ({card_data['complaint_rate']:.1%}) говорит о наличии некоторых проблем с заданием, но не критичных."
+        else:
+            complaint_rate_interpretation = f"**Низкая доля жалоб** ({card_data['complaint_rate']:.1%}) свидетельствует о том, что большинство студентов не испытывает проблем с заданием."
     else:
-        complaint_rate_interpretation = f"**Низкая доля жалоб** ({card_data['complaint_rate']:.1%}) свидетельствует о том, что большинство студентов не испытывает проблем с заданием."
+        complaint_rate_interpretation = "Данные о доле жалоб отсутствуют."
     
     # Отображаем интерпретацию
     st.markdown(complaints_interpretation)
     st.markdown(complaint_rate_interpretation)
     
     # Добавляем рекомендации на основе уровня жалоб
-    if complaints_total > 10 or card_data["complaint_rate"] > 0.05:
+    if complaints_total > 10 or (card_data["complaint_rate"] is not None and card_data["complaint_rate"] > 0.05):
         st.markdown("""
         **Рекомендации при высоком уровне жалоб:**
         - Проверить формулировку задания на наличие ошибок или неточностей
@@ -1121,17 +1140,20 @@ def display_discrimination_analysis(card_data):
     
     # Определяем цвет на основе значения
     color = "#9370db"
-    if card_data["discrimination_avg"] > 0.5:
+    discrimination_avg = card_data["discrimination_avg"]
+    if discrimination_avg is not None and discrimination_avg > 0.5:
         color = "#32CD32"  # зеленый для высокой дискриминативности
-    elif card_data["discrimination_avg"] < 0.2:
+    elif discrimination_avg is not None and discrimination_avg < 0.2:
         color = "#ff6666"  # красный для низкой дискриминативности
     
     # Добавляем столбец для дискриминативности
+    discrimination_value = discrimination_avg if discrimination_avg is not None else 0
+    
     fig.add_trace(go.Bar(
         x=["Индекс дискриминативности"],
-        y=[card_data["discrimination_avg"]],
+        y=[discrimination_value],
         marker_color=color,
-        text=[f"{card_data['discrimination_avg']:.3f}"],
+        text=[f"{discrimination_value:.3f}" if discrimination_avg is not None else "Нет данных"],
         textposition="auto"
     ))
     
@@ -1168,7 +1190,7 @@ def display_discrimination_analysis(card_data):
         title="Индекс дискриминативности",
         yaxis=dict(
             title="Значение",
-            range=[0, max(0.6, card_data["discrimination_avg"] * 1.2)]
+            range=[0, max(0.6, (card_data["discrimination_avg"] or 0) * 1.2)]
         ),
         xaxis=dict(
             range=[-0.5, 1]
@@ -1181,18 +1203,21 @@ def display_discrimination_analysis(card_data):
     st.markdown("### Интерпретация дискриминативности")
     
     discrimination_interpretation = ""
-    if card_data["discrimination_avg"] > 0.35:
-        discrimination_interpretation = f"Карточка имеет **высокую дискриминативность** ({card_data['discrimination_avg']:.3f}). Это указывает на то, что задание хорошо различает знающих и незнающих студентов."
-    elif card_data["discrimination_avg"] > 0.15:
-        discrimination_interpretation = f"Карточка имеет **среднюю дискриминативность** ({card_data['discrimination_avg']:.3f}). Это приемлемый показатель, но есть возможности для улучшения."
+    if discrimination_avg is not None:
+        if discrimination_avg > 0.35:
+            discrimination_interpretation = f"Карточка имеет **высокую дискриминативность** ({discrimination_avg:.3f}). Это указывает на то, что задание хорошо различает знающих и незнающих студентов."
+        elif discrimination_avg > 0.15:
+            discrimination_interpretation = f"Карточка имеет **среднюю дискриминативность** ({discrimination_avg:.3f}). Это приемлемый показатель, но есть возможности для улучшения."
+        else:
+            discrimination_interpretation = f"Карточка имеет **низкую дискриминативность** ({discrimination_avg:.3f}). Это указывает на то, что задание плохо различает знающих и незнающих студентов."
     else:
-        discrimination_interpretation = f"Карточка имеет **низкую дискриминативность** ({card_data['discrimination_avg']:.3f}). Это указывает на то, что задание плохо различает знающих и незнающих студентов."
+        discrimination_interpretation = "Данные о дискриминативности отсутствуют."
     
     # Отображаем интерпретацию
     st.markdown(discrimination_interpretation)
     
     # Добавляем рекомендации на основе уровня дискриминативности
-    if card_data["discrimination_avg"] < 0.25:
+    if discrimination_avg is not None and discrimination_avg < 0.25:
         st.markdown("""
         **Рекомендации при низкой дискриминативности:**
         - Проверить, не слишком ли простое или слишком сложное задание
@@ -1223,6 +1248,9 @@ def display_attempts_analysis(card_data):
     """
     st.markdown("## Анализ попыток")
     
+    # Получаем значение total_attempts для использования во всей функции
+    total_attempts = card_data["total_attempts"]
+    
     # Создаем колонки для разных показателей
     col1, col2 = st.columns(2)
     
@@ -1231,11 +1259,13 @@ def display_attempts_analysis(card_data):
         fig = go.Figure()
         
         # Добавляем столбец для количества попыток
+        total_attempts_safe = total_attempts if total_attempts is not None else 0
+        
         fig.add_trace(go.Bar(
             x=["Количество попыток"],
-            y=[card_data["total_attempts"]],
+            y=[total_attempts_safe],
             marker_color="#4da6ff",
-            text=[f"{card_data['total_attempts']:.0f}"],
+            text=[f"{total_attempts_safe:.0f}" if total_attempts is not None else "Нет данных"],
             textposition="auto"
         ))
         
@@ -1254,11 +1284,13 @@ def display_attempts_analysis(card_data):
         fig = go.Figure()
         
         # Добавляем столбец для доли пытавшихся
+        attempted_share = card_data["attempted_share"] if card_data["attempted_share"] is not None else 0
+        
         fig.add_trace(go.Bar(
             x=["Доля пытавшихся"],
-            y=[card_data["attempted_share"]],
+            y=[attempted_share],
             marker_color="#66c2a5",
-            text=[f"{card_data['attempted_share']:.1%}"],
+            text=[f"{attempted_share:.1%}" if attempted_share is not None else "Нет данных"],
             textposition="auto"
         ))
         
@@ -1278,31 +1310,37 @@ def display_attempts_analysis(card_data):
     st.markdown("### Интерпретация данных о попытках")
     
     attempts_interpretation = ""
-    if card_data["total_attempts"] > 500:
-        attempts_interpretation = f"Карточка имеет **очень большое количество попыток** ({card_data['total_attempts']:.0f}), что говорит о высокой статистической значимости метрик."
-    elif card_data["total_attempts"] > 100:
-        attempts_interpretation = f"Карточка имеет **достаточное количество попыток** ({card_data['total_attempts']:.0f}) для статистической значимости метрик."
-    elif card_data["total_attempts"] > 50:
-        attempts_interpretation = f"Карточка имеет **среднее количество попыток** ({card_data['total_attempts']:.0f}). Метрики могут быть умеренно надежными."
+    if total_attempts is not None:
+        if total_attempts > 500:
+            attempts_interpretation = f"Карточка имеет **очень большое количество попыток** ({total_attempts:.0f}), что говорит о высокой статистической значимости метрик."
+        elif total_attempts > 100:
+            attempts_interpretation = f"Карточка имеет **достаточное количество попыток** ({total_attempts:.0f}) для статистической значимости метрик."
+        elif total_attempts > 50:
+            attempts_interpretation = f"Карточка имеет **среднее количество попыток** ({total_attempts:.0f}). Метрики могут быть умеренно надежными."
+        else:
+            attempts_interpretation = f"Карточка имеет **малое количество попыток** ({total_attempts:.0f}), что снижает статистическую значимость метрик."
     else:
-        attempts_interpretation = f"Карточка имеет **малое количество попыток** ({card_data['total_attempts']:.0f}), что снижает статистическую значимость метрик."
+        attempts_interpretation = "Данные о количестве попыток отсутствуют."
     
     attempted_share_interpretation = ""
-    if card_data["attempted_share"] > 0.95:
-        attempted_share_interpretation = f"**Очень высокая доля пытавшихся** ({card_data['attempted_share']:.1%}) указывает на то, что практически все студенты пытаются решить это задание."
-    elif card_data["attempted_share"] > 0.8:
-        attempted_share_interpretation = f"**Высокая доля пытавшихся** ({card_data['attempted_share']:.1%}) говорит о том, что большинство студентов пытаются решить это задание."
-    elif card_data["attempted_share"] > 0.6:
-        attempted_share_interpretation = f"**Средняя доля пытавшихся** ({card_data['attempted_share']:.1%}) показывает, что задание пропускают некоторые студенты."
+    if card_data["attempted_share"] is not None:
+        if card_data["attempted_share"] > 0.95:
+            attempted_share_interpretation = f"**Очень высокая доля пытавшихся** ({card_data['attempted_share']:.1%}) указывает на то, что практически все студенты пытаются решить это задание."
+        elif card_data["attempted_share"] > 0.8:
+            attempted_share_interpretation = f"**Высокая доля пытавшихся** ({card_data['attempted_share']:.1%}) говорит о том, что большинство студентов пытаются решить это задание."
+        elif card_data["attempted_share"] > 0.6:
+            attempted_share_interpretation = f"**Средняя доля пытавшихся** ({card_data['attempted_share']:.1%}) показывает, что задание пропускают некоторые студенты."
+        else:
+            attempted_share_interpretation = f"**Низкая доля пытавшихся** ({card_data['attempted_share']:.1%}) указывает на то, что многие студенты пропускают это задание."
     else:
-        attempted_share_interpretation = f"**Низкая доля пытавшихся** ({card_data['attempted_share']:.1%}) указывает на то, что многие студенты пропускают это задание."
+        attempted_share_interpretation = "Данные о доле пытавшихся отсутствуют."
     
     # Отображаем интерпретацию
     st.markdown(attempts_interpretation)
     st.markdown(attempted_share_interpretation)
     
     # Добавляем рекомендации на основе доли пытавшихся
-    if card_data["attempted_share"] < 0.7:
+    if card_data["attempted_share"] is not None and card_data["attempted_share"] < 0.7:
         st.markdown("""
         **Рекомендации при низкой доле пытавшихся:**
         - Проверить позицию задания в уроке - возможно, оно находится в конце и студенты не доходят до него
@@ -1736,7 +1774,7 @@ def page_cards(df_card_details: pd.DataFrame, df_structure: pd.DataFrame, eng):
         """)
 
     # Отображаем метрику времени на карточку, если оно доступно
-    if pd.notna(card_data.get("time_median")):
+    if pd.notna(card_data.get("time_median")) and card_data.get("time_median") is not None:
         st.subheader("⏱️ Время выполнения")
         st.metric(
             label="Медианное время на карточку (мин)",
